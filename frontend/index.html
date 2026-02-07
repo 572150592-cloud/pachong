@@ -1,0 +1,1491 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OZON智能爬虫系统</title>
+    <link href="https://cdn.jsdelivr.net/npm/ant-design-vue@4.2.6/dist/reset.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        :root {
+            --primary: #1677ff;
+            --primary-light: #e6f4ff;
+            --success: #52c41a;
+            --warning: #faad14;
+            --danger: #ff4d4f;
+            --bg: #f5f5f5;
+            --card-bg: #ffffff;
+            --text: #333333;
+            --text-secondary: #666666;
+            --border: #e8e8e8;
+            --sidebar-bg: #001529;
+            --sidebar-text: #ffffffa6;
+            --sidebar-active: #1677ff;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+        
+        /* 布局 */
+        .layout {
+            display: flex;
+            min-height: 100vh;
+        }
+        
+        /* 侧边栏 */
+        .sidebar {
+            width: 240px;
+            background: var(--sidebar-bg);
+            color: var(--sidebar-text);
+            position: fixed;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            z-index: 100;
+            overflow-y: auto;
+        }
+        
+        .sidebar-logo {
+            height: 64px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .sidebar-logo h1 {
+            color: #fff;
+            font-size: 18px;
+            font-weight: 600;
+        }
+        
+        .sidebar-logo span {
+            color: var(--primary);
+        }
+        
+        .nav-menu {
+            padding: 12px 0;
+        }
+        
+        .nav-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 24px;
+            color: var(--sidebar-text);
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 14px;
+            border-left: 3px solid transparent;
+        }
+        
+        .nav-item:hover {
+            color: #fff;
+            background: rgba(255,255,255,0.06);
+        }
+        
+        .nav-item.active {
+            color: #fff;
+            background: rgba(22,119,255,0.15);
+            border-left-color: var(--primary);
+        }
+        
+        .nav-item .mdi {
+            font-size: 20px;
+            margin-right: 12px;
+            width: 20px;
+            text-align: center;
+        }
+        
+        /* 主内容区 */
+        .main-content {
+            margin-left: 240px;
+            flex: 1;
+            min-height: 100vh;
+        }
+        
+        .header {
+            height: 64px;
+            background: var(--card-bg);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 24px;
+            position: sticky;
+            top: 0;
+            z-index: 50;
+        }
+        
+        .header-title {
+            font-size: 18px;
+            font-weight: 600;
+        }
+        
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        
+        .content {
+            padding: 24px;
+        }
+        
+        /* 卡片 */
+        .card {
+            background: var(--card-bg);
+            border-radius: 8px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+            margin-bottom: 24px;
+        }
+        
+        .card-header {
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .card-header h3 {
+            font-size: 16px;
+            font-weight: 600;
+        }
+        
+        .card-body {
+            padding: 24px;
+        }
+        
+        /* 统计卡片 */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        
+        .stat-card {
+            background: var(--card-bg);
+            border-radius: 8px;
+            padding: 20px 24px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        
+        .stat-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+        }
+        
+        .stat-icon.blue { background: #e6f4ff; color: #1677ff; }
+        .stat-icon.green { background: #f6ffed; color: #52c41a; }
+        .stat-icon.orange { background: #fff7e6; color: #fa8c16; }
+        .stat-icon.purple { background: #f9f0ff; color: #722ed1; }
+        .stat-icon.red { background: #fff2f0; color: #ff4d4f; }
+        
+        .stat-info h4 {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+            font-weight: 400;
+        }
+        
+        .stat-info .value {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--text);
+        }
+        
+        /* 按钮 */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: var(--card-bg);
+            color: var(--text);
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: inherit;
+        }
+        
+        .btn:hover { border-color: var(--primary); color: var(--primary); }
+        
+        .btn-primary {
+            background: var(--primary);
+            color: #fff;
+            border-color: var(--primary);
+        }
+        
+        .btn-primary:hover { background: #4096ff; border-color: #4096ff; color: #fff; }
+        
+        .btn-danger {
+            background: var(--danger);
+            color: #fff;
+            border-color: var(--danger);
+        }
+        
+        .btn-danger:hover { background: #ff7875; border-color: #ff7875; color: #fff; }
+        
+        .btn-success {
+            background: var(--success);
+            color: #fff;
+            border-color: var(--success);
+        }
+        
+        .btn-sm { padding: 4px 12px; font-size: 13px; }
+        
+        /* 表格 */
+        .table-wrapper {
+            overflow-x: auto;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+        
+        thead th {
+            background: #fafafa;
+            padding: 12px 16px;
+            text-align: left;
+            font-weight: 600;
+            border-bottom: 1px solid var(--border);
+            white-space: nowrap;
+            position: sticky;
+            top: 0;
+        }
+        
+        tbody td {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        tbody tr:hover { background: #fafafa; }
+        
+        /* 表单 */
+        .form-group {
+            margin-bottom: 16px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        .form-input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: inherit;
+            transition: border-color 0.2s;
+        }
+        
+        .form-input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(22,119,255,0.1);
+        }
+        
+        select.form-input {
+            appearance: none;
+            background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M6 8L1 3h10z'/%3E%3C/svg%3E") no-repeat right 12px center;
+            padding-right: 32px;
+        }
+        
+        .form-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+        }
+        
+        /* 标签 */
+        .tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        
+        .tag-pending { background: #fff7e6; color: #d46b08; }
+        .tag-running { background: #e6f4ff; color: #0958d9; }
+        .tag-completed { background: #f6ffed; color: #389e0d; }
+        .tag-failed { background: #fff2f0; color: #cf1322; }
+        .tag-cancelled { background: #f5f5f5; color: #8c8c8c; }
+        .tag-active { background: #f6ffed; color: #389e0d; }
+        .tag-inactive { background: #f5f5f5; color: #8c8c8c; }
+        
+        /* 模态框 */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.45);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal {
+            background: var(--card-bg);
+            border-radius: 8px;
+            width: 560px;
+            max-width: 90vw;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 6px 16px rgba(0,0,0,0.12);
+        }
+        
+        .modal-header {
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .modal-header h3 { font-size: 16px; }
+        
+        .modal-body { padding: 24px; }
+        
+        .modal-footer {
+            padding: 12px 24px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+        
+        /* 分页 */
+        .pagination {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 0;
+        }
+        
+        .pagination-info {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        
+        .pagination-btns {
+            display: flex;
+            gap: 8px;
+        }
+        
+        /* 进度条 */
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #f0f0f0;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .progress-bar-fill {
+            height: 100%;
+            background: var(--primary);
+            border-radius: 4px;
+            transition: width 0.3s;
+        }
+        
+        /* 状态指示器 */
+        .status-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+        
+        .status-dot.running { background: var(--primary); animation: pulse 1.5s infinite; }
+        .status-dot.idle { background: #d9d9d9; }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        
+        /* 空状态 */
+        .empty-state {
+            text-align: center;
+            padding: 48px 24px;
+            color: var(--text-secondary);
+        }
+        
+        .empty-state .mdi {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.3;
+        }
+        
+        /* 商品图片 */
+        .product-img {
+            width: 48px;
+            height: 48px;
+            border-radius: 6px;
+            object-fit: cover;
+            border: 1px solid var(--border);
+        }
+        
+        /* 隐藏页面 */
+        .page { display: none; }
+        .page.active { display: block; }
+        
+        /* Toast */
+        .toast-container {
+            position: fixed;
+            top: 80px;
+            right: 24px;
+            z-index: 2000;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        .toast {
+            padding: 12px 20px;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 14px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            animation: slideIn 0.3s ease;
+            max-width: 400px;
+        }
+        
+        .toast-success { background: var(--success); }
+        .toast-error { background: var(--danger); }
+        .toast-info { background: var(--primary); }
+        
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        
+        /* 响应式 */
+        @media (max-width: 768px) {
+            .sidebar { width: 0; overflow: hidden; }
+            .main-content { margin-left: 0; }
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+    </style>
+</head>
+<body>
+    <div class="layout">
+        <!-- 侧边栏 -->
+        <aside class="sidebar">
+            <div class="sidebar-logo">
+                <h1><span>OZON</span> 智能爬虫</h1>
+            </div>
+            <nav class="nav-menu">
+                <div class="nav-item active" onclick="showPage('dashboard')">
+                    <i class="mdi mdi-view-dashboard"></i>
+                    <span>仪表板</span>
+                </div>
+                <div class="nav-item" onclick="showPage('keywords')">
+                    <i class="mdi mdi-key-variant"></i>
+                    <span>关键词管理</span>
+                </div>
+                <div class="nav-item" onclick="showPage('tasks')">
+                    <i class="mdi mdi-rocket-launch"></i>
+                    <span>采集任务</span>
+                </div>
+                <div class="nav-item" onclick="showPage('products')">
+                    <i class="mdi mdi-package-variant-closed"></i>
+                    <span>商品数据</span>
+                </div>
+                <div class="nav-item" onclick="showPage('schedules')">
+                    <i class="mdi mdi-clock-outline"></i>
+                    <span>定时任务</span>
+                </div>
+                <div class="nav-item" onclick="showPage('profit')">
+                    <i class="mdi mdi-calculator"></i>
+                    <span>利润计算</span>
+                </div>
+                <div class="nav-item" onclick="showPage('settings')">
+                    <i class="mdi mdi-cog"></i>
+                    <span>系统设置</span>
+                </div>
+            </nav>
+        </aside>
+
+        <!-- 主内容 -->
+        <main class="main-content">
+            <header class="header">
+                <div class="header-title" id="pageTitle">仪表板</div>
+                <div class="header-actions">
+                    <div id="scraperStatus">
+                        <span class="status-dot idle"></span>
+                        <span>空闲</span>
+                    </div>
+                </div>
+            </header>
+
+            <div class="content">
+                <!-- 仪表板页面 -->
+                <div class="page active" id="page-dashboard">
+                    <div class="stats-grid" id="statsGrid">
+                        <div class="stat-card">
+                            <div class="stat-icon blue"><i class="mdi mdi-package-variant-closed"></i></div>
+                            <div class="stat-info">
+                                <h4>商品总数</h4>
+                                <div class="value" id="statProducts">0</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon green"><i class="mdi mdi-key-variant"></i></div>
+                            <div class="stat-info">
+                                <h4>活跃关键词</h4>
+                                <div class="value" id="statKeywords">0</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon orange"><i class="mdi mdi-rocket-launch"></i></div>
+                            <div class="stat-info">
+                                <h4>总任务数</h4>
+                                <div class="value" id="statTasks">0</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon purple"><i class="mdi mdi-play-circle"></i></div>
+                            <div class="stat-info">
+                                <h4>运行中任务</h4>
+                                <div class="value" id="statRunning">0</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>最近采集任务</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-wrapper">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>ID</th>
+                                            <th>关键词</th>
+                                            <th>状态</th>
+                                            <th>采集数量</th>
+                                            <th>创建时间</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="recentTasksBody">
+                                        <tr><td colspan="5" class="empty-state">暂无数据</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 关键词管理页面 -->
+                <div class="page" id="page-keywords">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>关键词列表</h3>
+                            <button class="btn btn-primary" onclick="showAddKeywordModal()">
+                                <i class="mdi mdi-plus"></i> 添加关键词
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-wrapper">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>ID</th>
+                                            <th>关键词</th>
+                                            <th>中文翻译</th>
+                                            <th>状态</th>
+                                            <th>优先级</th>
+                                            <th>最大采集数</th>
+                                            <th>已采集</th>
+                                            <th>上次采集</th>
+                                            <th>操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="keywordsBody">
+                                        <tr><td colspan="9" class="empty-state">暂无数据</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 采集任务页面 -->
+                <div class="page" id="page-tasks">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>采集任务</h3>
+                            <div style="display:flex;gap:8px;">
+                                <button class="btn btn-primary" onclick="showStartTaskModal()">
+                                    <i class="mdi mdi-play"></i> 新建任务
+                                </button>
+                                <button class="btn btn-danger" onclick="stopAllTasks()">
+                                    <i class="mdi mdi-stop"></i> 停止所有
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div id="taskProgress" style="display:none;margin-bottom:16px;">
+                                <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+                                    <span id="taskProgressText">采集中...</span>
+                                    <span id="taskProgressCount">0/0</span>
+                                </div>
+                                <div class="progress-bar">
+                                    <div class="progress-bar-fill" id="taskProgressBar" style="width:0%"></div>
+                                </div>
+                            </div>
+                            <div class="table-wrapper">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>ID</th>
+                                            <th>关键词</th>
+                                            <th>状态</th>
+                                            <th>目标数量</th>
+                                            <th>已采集</th>
+                                            <th>耗时</th>
+                                            <th>开始时间</th>
+                                            <th>错误信息</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="tasksBody">
+                                        <tr><td colspan="8" class="empty-state">暂无数据</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 商品数据页面 -->
+                <div class="page" id="page-products">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>商品数据</h3>
+                            <div style="display:flex;gap:8px;">
+                                <button class="btn" onclick="exportData('xlsx')">
+                                    <i class="mdi mdi-file-excel"></i> 导出Excel
+                                </button>
+                                <button class="btn" onclick="exportData('csv')">
+                                    <i class="mdi mdi-file-delimited"></i> 导出CSV
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="form-row" style="margin-bottom:16px;">
+                                <div class="form-group">
+                                    <input type="text" class="form-input" id="searchKeyword" placeholder="按关键词搜索..." onkeyup="if(event.key==='Enter')loadProducts()">
+                                </div>
+                                <div class="form-group">
+                                    <input type="number" class="form-input" id="minPrice" placeholder="最低价格">
+                                </div>
+                                <div class="form-group">
+                                    <input type="number" class="form-input" id="maxPrice" placeholder="最高价格">
+                                </div>
+                                <div class="form-group">
+                                    <button class="btn btn-primary" onclick="loadProducts()">搜索</button>
+                                </div>
+                            </div>
+                            <div class="table-wrapper">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>图片</th>
+                                            <th>SKU</th>
+                                            <th>标题</th>
+                                            <th>价格（₽）</th>
+                                            <th>原价（₽）</th>
+                                            <th>折扣</th>
+                                            <th>品牌</th>
+                                            <th>评分</th>
+                                            <th>月销量</th>
+                                            <th>卖家类型</th>
+                                            <th>关键词</th>
+                                            <th>采集时间</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="productsBody">
+                                        <tr><td colspan="12" class="empty-state">暂无数据</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="pagination">
+                                <div class="pagination-info" id="productsPagination">共 0 条数据</div>
+                                <div class="pagination-btns">
+                                    <button class="btn btn-sm" onclick="changePage(-1)">上一页</button>
+                                    <button class="btn btn-sm" onclick="changePage(1)">下一页</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 定时任务页面 -->
+                <div class="page" id="page-schedules">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>定时任务</h3>
+                            <button class="btn btn-primary" onclick="showAddScheduleModal()">
+                                <i class="mdi mdi-plus"></i> 创建定时任务
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-wrapper">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>ID</th>
+                                            <th>名称</th>
+                                            <th>关键词</th>
+                                            <th>Cron表达式</th>
+                                            <th>每词最大数</th>
+                                            <th>切换模式</th>
+                                            <th>状态</th>
+                                            <th>上次执行</th>
+                                            <th>操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="schedulesBody">
+                                        <tr><td colspan="9" class="empty-state">暂无数据</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 利润计算页面 -->
+                <div class="page" id="page-profit">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>利润计算器</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>商品SKU</label>
+                                    <input type="number" class="form-input" id="profitSku" placeholder="输入OZON商品SKU">
+                                </div>
+                                <div class="form-group">
+                                    <label>拼多多采购价（¥）</label>
+                                    <input type="number" step="0.01" class="form-input" id="profitPddPrice" placeholder="0.00">
+                                </div>
+                                <div class="form-group">
+                                    <label>运费（¥）</label>
+                                    <input type="number" step="0.01" class="form-input" id="profitShipping" placeholder="0.00" value="0">
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>平台佣金率</label>
+                                    <input type="number" step="0.01" class="form-input" id="profitCommission" placeholder="0.15" value="0.15">
+                                </div>
+                                <div class="form-group">
+                                    <label>汇率（¥→₽）</label>
+                                    <input type="number" step="0.01" class="form-input" id="profitExchangeRate" placeholder="13.5" value="13.5">
+                                </div>
+                                <div class="form-group" style="display:flex;align-items:flex-end;">
+                                    <button class="btn btn-primary" onclick="calculateProfit()">计算利润</button>
+                                </div>
+                            </div>
+                            <div id="profitResult" style="display:none;margin-top:24px;">
+                                <div class="stats-grid">
+                                    <div class="stat-card">
+                                        <div class="stat-icon blue"><i class="mdi mdi-tag"></i></div>
+                                        <div class="stat-info">
+                                            <h4>OZON售价</h4>
+                                            <div class="value" id="profitSellingPrice">₽0</div>
+                                        </div>
+                                    </div>
+                                    <div class="stat-card">
+                                        <div class="stat-icon orange"><i class="mdi mdi-cart"></i></div>
+                                        <div class="stat-info">
+                                            <h4>采购成本（₽）</h4>
+                                            <div class="value" id="profitCostRub">₽0</div>
+                                        </div>
+                                    </div>
+                                    <div class="stat-card">
+                                        <div class="stat-icon green"><i class="mdi mdi-cash"></i></div>
+                                        <div class="stat-info">
+                                            <h4>利润（₽）</h4>
+                                            <div class="value" id="profitAmountRub">₽0</div>
+                                        </div>
+                                    </div>
+                                    <div class="stat-card">
+                                        <div class="stat-icon purple"><i class="mdi mdi-percent"></i></div>
+                                        <div class="stat-info">
+                                            <h4>利润率</h4>
+                                            <div class="value" id="profitMargin">0%</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 系统设置页面 -->
+                <div class="page" id="page-settings">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>系统设置</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="form-group">
+                                <label>代理IP配置</label>
+                                <textarea class="form-input" rows="4" id="settingProxy" placeholder="每行一个代理IP，格式: http://user:pass@host:port"></textarea>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>人民币→卢布汇率</label>
+                                    <input type="number" step="0.01" class="form-input" id="settingCnyToRub" value="13.5">
+                                </div>
+                                <div class="form-group">
+                                    <label>默认采集数量</label>
+                                    <input type="number" class="form-input" id="settingMaxProducts" value="5000">
+                                </div>
+                                <div class="form-group">
+                                    <label>浏览器模式</label>
+                                    <select class="form-input" id="settingHeadless">
+                                        <option value="true">无头模式（推荐）</option>
+                                        <option value="false">有界面模式（调试用）</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <button class="btn btn-primary" onclick="saveSettings()">保存设置</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Toast容器 -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- 模态框容器 -->
+    <div id="modalContainer"></div>
+
+    <script>
+        // ==================== 全局状态 ====================
+        const API_BASE = window.location.origin + '/api';
+        let currentPage = 'dashboard';
+        let productsPage = 1;
+        let productsTotal = 0;
+        let statusTimer = null;
+
+        // ==================== 工具函数 ====================
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        async function api(path, options = {}) {
+            try {
+                const url = API_BASE + path;
+                const resp = await fetch(url, {
+                    headers: { 'Content-Type': 'application/json', ...options.headers },
+                    ...options,
+                });
+                if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}));
+                    throw new Error(err.detail || `HTTP ${resp.status}`);
+                }
+                return await resp.json();
+            } catch (e) {
+                showToast(e.message, 'error');
+                throw e;
+            }
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr || dateStr === 'None') return '-';
+            try {
+                return new Date(dateStr).toLocaleString('zh-CN');
+            } catch { return dateStr; }
+        }
+
+        function formatDuration(seconds) {
+            if (!seconds) return '-';
+            if (seconds < 60) return `${seconds}秒`;
+            if (seconds < 3600) return `${Math.floor(seconds/60)}分${seconds%60}秒`;
+            return `${Math.floor(seconds/3600)}时${Math.floor((seconds%3600)/60)}分`;
+        }
+
+        function statusTag(status) {
+            const labels = {
+                pending: '等待中', running: '运行中', completed: '已完成',
+                failed: '失败', cancelled: '已取消'
+            };
+            return `<span class="tag tag-${status}">${labels[status] || status}</span>`;
+        }
+
+        // ==================== 页面导航 ====================
+        function showPage(page) {
+            currentPage = page;
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            document.getElementById(`page-${page}`).classList.add('active');
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            event.currentTarget.classList.add('active');
+            
+            const titles = {
+                dashboard: '仪表板', keywords: '关键词管理', tasks: '采集任务',
+                products: '商品数据', schedules: '定时任务', profit: '利润计算',
+                settings: '系统设置'
+            };
+            document.getElementById('pageTitle').textContent = titles[page] || page;
+            
+            // 加载页面数据
+            if (page === 'dashboard') loadDashboard();
+            else if (page === 'keywords') loadKeywords();
+            else if (page === 'tasks') loadTasks();
+            else if (page === 'products') loadProducts();
+            else if (page === 'schedules') loadSchedules();
+        }
+
+        // ==================== 仪表板 ====================
+        async function loadDashboard() {
+            try {
+                const data = await api('/dashboard');
+                document.getElementById('statProducts').textContent = data.stats.total_products.toLocaleString();
+                document.getElementById('statKeywords').textContent = data.stats.active_keywords;
+                document.getElementById('statTasks').textContent = data.stats.total_tasks;
+                document.getElementById('statRunning').textContent = data.stats.running_tasks;
+
+                // 更新爬虫状态
+                updateScraperStatus(data.scraper_status);
+
+                // 最近任务
+                const tbody = document.getElementById('recentTasksBody');
+                if (data.recent_tasks.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">暂无数据</td></tr>';
+                } else {
+                    tbody.innerHTML = data.recent_tasks.map(t => `
+                        <tr>
+                            <td>${t.id}</td>
+                            <td>${t.keyword}</td>
+                            <td>${statusTag(t.status)}</td>
+                            <td>${t.scraped_count || 0}</td>
+                            <td>${formatDate(t.created_at)}</td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        function updateScraperStatus(status) {
+            const el = document.getElementById('scraperStatus');
+            if (status.is_running) {
+                el.innerHTML = `<span class="status-dot running"></span><span>采集中: ${status.current_keyword}</span>`;
+            } else {
+                el.innerHTML = '<span class="status-dot idle"></span><span>空闲</span>';
+            }
+        }
+
+        // ==================== 关键词管理 ====================
+        async function loadKeywords() {
+            try {
+                const data = await api('/keywords');
+                const tbody = document.getElementById('keywordsBody');
+                if (data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="9" class="empty-state">暂无关键词，请点击"添加关键词"</td></tr>';
+                } else {
+                    tbody.innerHTML = data.map(k => `
+                        <tr>
+                            <td>${k.id}</td>
+                            <td><strong>${k.keyword}</strong></td>
+                            <td>${k.keyword_zh || '-'}</td>
+                            <td><span class="tag tag-${k.is_active ? 'active' : 'inactive'}">${k.is_active ? '启用' : '禁用'}</span></td>
+                            <td>${k.priority}</td>
+                            <td>${k.max_products.toLocaleString()}</td>
+                            <td>${(k.total_scraped || 0).toLocaleString()}</td>
+                            <td>${formatDate(k.last_scraped_at)}</td>
+                            <td>
+                                <button class="btn btn-sm" onclick="toggleKeyword(${k.id}, ${!k.is_active})">${k.is_active ? '禁用' : '启用'}</button>
+                                <button class="btn btn-sm btn-danger" onclick="deleteKeyword(${k.id})">删除</button>
+                            </td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        function showAddKeywordModal() {
+            document.getElementById('modalContainer').innerHTML = `
+                <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+                    <div class="modal">
+                        <div class="modal-header">
+                            <h3>添加关键词</h3>
+                            <button class="btn btn-sm" onclick="closeModal()">✕</button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="form-group">
+                                <label>关键词（俄语）</label>
+                                <input type="text" class="form-input" id="newKeyword" placeholder="例如: наушники">
+                            </div>
+                            <div class="form-group">
+                                <label>中文翻译</label>
+                                <input type="text" class="form-input" id="newKeywordZh" placeholder="例如: 耳机">
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>优先级</label>
+                                    <input type="number" class="form-input" id="newKeywordPriority" value="0">
+                                </div>
+                                <div class="form-group">
+                                    <label>最大采集数</label>
+                                    <input type="number" class="form-input" id="newKeywordMaxProducts" value="5000">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn" onclick="closeModal()">取消</button>
+                            <button class="btn btn-primary" onclick="addKeyword()">添加</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function addKeyword() {
+            const keyword = document.getElementById('newKeyword').value.trim();
+            if (!keyword) { showToast('请输入关键词', 'error'); return; }
+            try {
+                await api('/keywords', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        keyword,
+                        keyword_zh: document.getElementById('newKeywordZh').value.trim(),
+                        priority: parseInt(document.getElementById('newKeywordPriority').value) || 0,
+                        max_products: parseInt(document.getElementById('newKeywordMaxProducts').value) || 5000,
+                    }),
+                });
+                showToast('关键词添加成功', 'success');
+                closeModal();
+                loadKeywords();
+            } catch (e) { console.error(e); }
+        }
+
+        async function toggleKeyword(id, active) {
+            try {
+                await api(`/keywords/${id}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ is_active: active }),
+                });
+                loadKeywords();
+            } catch (e) { console.error(e); }
+        }
+
+        async function deleteKeyword(id) {
+            if (!confirm('确定删除此关键词？')) return;
+            try {
+                await api(`/keywords/${id}`, { method: 'DELETE' });
+                showToast('关键词已删除', 'success');
+                loadKeywords();
+            } catch (e) { console.error(e); }
+        }
+
+        // ==================== 采集任务 ====================
+        async function loadTasks() {
+            try {
+                const data = await api('/tasks');
+                const tbody = document.getElementById('tasksBody');
+                if (data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="8" class="empty-state">暂无任务</td></tr>';
+                } else {
+                    tbody.innerHTML = data.map(t => `
+                        <tr>
+                            <td>${t.id}</td>
+                            <td><strong>${t.keyword}</strong></td>
+                            <td>${statusTag(t.status)}</td>
+                            <td>${t.max_products.toLocaleString()}</td>
+                            <td>${(t.scraped_count || 0).toLocaleString()}</td>
+                            <td>${formatDuration(t.duration_seconds)}</td>
+                            <td>${formatDate(t.started_at)}</td>
+                            <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;">${t.error_message || '-'}</td>
+                        </tr>
+                    `).join('');
+                }
+
+                // 检查是否有运行中的任务
+                const status = await api('/tasks/status');
+                if (status.is_running) {
+                    document.getElementById('taskProgress').style.display = 'block';
+                    const p = status.progress;
+                    if (p && p.scraped !== undefined) {
+                        const pct = Math.min(100, (p.scraped / p.target * 100)).toFixed(1);
+                        document.getElementById('taskProgressText').textContent = `正在采集: ${p.keyword}`;
+                        document.getElementById('taskProgressCount').textContent = `${p.scraped}/${p.target}`;
+                        document.getElementById('taskProgressBar').style.width = pct + '%';
+                    }
+                } else {
+                    document.getElementById('taskProgress').style.display = 'none';
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        function showStartTaskModal() {
+            document.getElementById('modalContainer').innerHTML = `
+                <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+                    <div class="modal">
+                        <div class="modal-header">
+                            <h3>新建采集任务</h3>
+                            <button class="btn btn-sm" onclick="closeModal()">✕</button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="form-group">
+                                <label>关键词（每行一个）</label>
+                                <textarea class="form-input" rows="4" id="taskKeywords" placeholder="наушники&#10;телефон&#10;ноутбук"></textarea>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>每个关键词最大采集数</label>
+                                    <input type="number" class="form-input" id="taskMaxProducts" value="5000">
+                                </div>
+                                <div class="form-group">
+                                    <label>切换模式</label>
+                                    <select class="form-input" id="taskSwitchMode">
+                                        <option value="sequential">顺序模式</option>
+                                        <option value="timer">定时切换</option>
+                                        <option value="quantity">定量切换</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>切换间隔（分钟）</label>
+                                    <input type="number" class="form-input" id="taskSwitchInterval" value="30">
+                                </div>
+                                <div class="form-group">
+                                    <label>切换数量</label>
+                                    <input type="number" class="form-input" id="taskSwitchQuantity" value="1000">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="taskImportOnly"> 仅搜索进口商品
+                                </label>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn" onclick="closeModal()">取消</button>
+                            <button class="btn btn-primary" onclick="startTask()">开始采集</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function startTask() {
+            const keywordsText = document.getElementById('taskKeywords').value.trim();
+            if (!keywordsText) { showToast('请输入关键词', 'error'); return; }
+            const keywords = keywordsText.split('\n').map(k => k.trim()).filter(k => k);
+            try {
+                const result = await api('/tasks/start', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        keywords,
+                        max_products: parseInt(document.getElementById('taskMaxProducts').value) || 5000,
+                        switch_mode: document.getElementById('taskSwitchMode').value,
+                        switch_interval: parseInt(document.getElementById('taskSwitchInterval').value) || 30,
+                        switch_quantity: parseInt(document.getElementById('taskSwitchQuantity').value) || 1000,
+                        import_only: document.getElementById('taskImportOnly').checked,
+                    }),
+                });
+                showToast(result.message, 'success');
+                closeModal();
+                loadTasks();
+                startStatusPolling();
+            } catch (e) { console.error(e); }
+        }
+
+        async function stopAllTasks() {
+            if (!confirm('确定停止所有采集任务？')) return;
+            try {
+                await api('/tasks/stop', { method: 'POST' });
+                showToast('所有任务已停止', 'success');
+                loadTasks();
+            } catch (e) { console.error(e); }
+        }
+
+        function startStatusPolling() {
+            if (statusTimer) clearInterval(statusTimer);
+            statusTimer = setInterval(async () => {
+                try {
+                    const status = await api('/tasks/status');
+                    updateScraperStatus(status);
+                    if (!status.is_running) {
+                        clearInterval(statusTimer);
+                        statusTimer = null;
+                        if (currentPage === 'tasks') loadTasks();
+                        if (currentPage === 'dashboard') loadDashboard();
+                    } else if (currentPage === 'tasks') {
+                        loadTasks();
+                    }
+                } catch (e) { console.error(e); }
+            }, 5000);
+        }
+
+        // ==================== 商品数据 ====================
+        async function loadProducts() {
+            try {
+                const keyword = document.getElementById('searchKeyword').value.trim();
+                const minPrice = document.getElementById('minPrice').value;
+                const maxPrice = document.getElementById('maxPrice').value;
+                
+                let params = `?page=${productsPage}&page_size=50`;
+                if (keyword) params += `&keyword=${encodeURIComponent(keyword)}`;
+                if (minPrice) params += `&min_price=${minPrice}`;
+                if (maxPrice) params += `&max_price=${maxPrice}`;
+
+                const data = await api('/products' + params);
+                productsTotal = data.total;
+
+                const tbody = document.getElementById('productsBody');
+                if (data.data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="12" class="empty-state">暂无商品数据</td></tr>';
+                } else {
+                    tbody.innerHTML = data.data.map(p => `
+                        <tr>
+                            <td>${p.image_url ? `<img src="${p.image_url}" class="product-img" onerror="this.style.display='none'">` : '-'}</td>
+                            <td>${p.sku}</td>
+                            <td style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${p.title || ''}">${p.title || '-'}</td>
+                            <td><strong>${p.price ? '₽' + p.price.toLocaleString() : '-'}</strong></td>
+                            <td>${p.original_price ? '₽' + p.original_price.toLocaleString() : '-'}</td>
+                            <td>${p.discount_percent ? `-${p.discount_percent}%` : '-'}</td>
+                            <td>${p.brand || '-'}</td>
+                            <td>${p.rating || '-'}</td>
+                            <td>${p.monthly_sales || '-'}</td>
+                            <td>${p.seller_type || '-'}</td>
+                            <td>${p.keyword || '-'}</td>
+                            <td>${formatDate(p.last_scraped_at)}</td>
+                        </tr>
+                    `).join('');
+                }
+
+                document.getElementById('productsPagination').textContent = 
+                    `共 ${productsTotal} 条数据，第 ${productsPage} 页`;
+            } catch (e) { console.error(e); }
+        }
+
+        function changePage(delta) {
+            const maxPage = Math.ceil(productsTotal / 50) || 1;
+            productsPage = Math.max(1, Math.min(maxPage, productsPage + delta));
+            loadProducts();
+        }
+
+        async function exportData(format) {
+            try {
+                const keyword = document.getElementById('searchKeyword').value.trim();
+                const resp = await fetch(API_BASE + '/export', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ format, keyword: keyword || null }),
+                });
+                if (!resp.ok) throw new Error('导出失败');
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `ozon_products.${format}`;
+                a.click();
+                URL.revokeObjectURL(url);
+                showToast('导出成功', 'success');
+            } catch (e) { showToast(e.message, 'error'); }
+        }
+
+        // ==================== 定时任务 ====================
+        async function loadSchedules() {
+            try {
+                const data = await api('/schedules');
+                const tbody = document.getElementById('schedulesBody');
+                if (data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="9" class="empty-state">暂无定时任务</td></tr>';
+                } else {
+                    tbody.innerHTML = data.map(s => `
+                        <tr>
+                            <td>${s.id}</td>
+                            <td><strong>${s.name}</strong></td>
+                            <td>${(s.keywords || []).join(', ')}</td>
+                            <td><code>${s.cron_expression}</code></td>
+                            <td>${s.max_products_per_keyword.toLocaleString()}</td>
+                            <td>${s.switch_mode}</td>
+                            <td><span class="tag tag-${s.is_active ? 'active' : 'inactive'}">${s.is_active ? '启用' : '禁用'}</span></td>
+                            <td>${formatDate(s.last_run_at)}</td>
+                            <td>
+                                <button class="btn btn-sm btn-danger" onclick="deleteSchedule(${s.id})">删除</button>
+                            </td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        function showAddScheduleModal() {
+            document.getElementById('modalContainer').innerHTML = `
+                <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+                    <div class="modal">
+                        <div class="modal-header">
+                            <h3>创建定时任务</h3>
+                            <button class="btn btn-sm" onclick="closeModal()">✕</button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="form-group">
+                                <label>任务名称</label>
+                                <input type="text" class="form-input" id="scheduleName" placeholder="例如: 每日耳机数据采集">
+                            </div>
+                            <div class="form-group">
+                                <label>关键词（每行一个）</label>
+                                <textarea class="form-input" rows="3" id="scheduleKeywords" placeholder="наушники&#10;телефон"></textarea>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Cron表达式</label>
+                                    <input type="text" class="form-input" id="scheduleCron" placeholder="0 2 * * *" value="0 2 * * *">
+                                    <small style="color:var(--text-secondary)">示例: 0 2 * * * = 每天凌晨2点</small>
+                                </div>
+                                <div class="form-group">
+                                    <label>每个关键词最大采集数</label>
+                                    <input type="number" class="form-input" id="scheduleMaxProducts" value="5000">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn" onclick="closeModal()">取消</button>
+                            <button class="btn btn-primary" onclick="addSchedule()">创建</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function addSchedule() {
+            const name = document.getElementById('scheduleName').value.trim();
+            const keywordsText = document.getElementById('scheduleKeywords').value.trim();
+            const cron = document.getElementById('scheduleCron').value.trim();
+            if (!name || !keywordsText || !cron) {
+                showToast('请填写所有必填项', 'error');
+                return;
+            }
+            // 先确保关键词都存在
+            const keywords = keywordsText.split('\n').map(k => k.trim()).filter(k => k);
+            const keywordIds = [];
+            for (const kw of keywords) {
+                try {
+                    const result = await api('/keywords', {
+                        method: 'POST',
+                        body: JSON.stringify({ keyword: kw, max_products: 5000 }),
+                    });
+                    keywordIds.push(result.id);
+                } catch {
+                    // 关键词可能已存在，获取其ID
+                    const allKws = await api('/keywords');
+                    const found = allKws.find(k => k.keyword === kw);
+                    if (found) keywordIds.push(found.id);
+                }
+            }
+            try {
+                await api('/schedules', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        name,
+                        keyword_ids: keywordIds,
+                        cron_expression: cron,
+                        max_products_per_keyword: parseInt(document.getElementById('scheduleMaxProducts').value) || 5000,
+                        switch_mode: 'sequential',
+                        switch_interval: 30,
+                        switch_quantity: 1000,
+                    }),
+                });
+                showToast('定时任务创建成功', 'success');
+                closeModal();
+                loadSchedules();
+            } catch (e) { console.error(e); }
+        }
+
+        async function deleteSchedule(id) {
+            if (!confirm('确定删除此定时任务？')) return;
+            try {
+                await api(`/schedules/${id}`, { method: 'DELETE' });
+                showToast('定时任务已删除', 'success');
+                loadSchedules();
+            } catch (e) { console.error(e); }
+        }
+
+        // ==================== 利润计算 ====================
+        async function calculateProfit() {
+            const sku = document.getElementById('profitSku').value;
+            const pddPrice = document.getElementById('profitPddPrice').value;
+            if (!sku || !pddPrice) { showToast('请输入SKU和采购价', 'error'); return; }
+            try {
+                const result = await api('/profit/calculate', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        sku: parseInt(sku),
+                        pdd_price_cny: parseFloat(pddPrice),
+                        shipping_cost_cny: parseFloat(document.getElementById('profitShipping').value) || 0,
+                        commission_rate: parseFloat(document.getElementById('profitCommission').value) || 0.15,
+                        exchange_rate: parseFloat(document.getElementById('profitExchangeRate').value) || 13.5,
+                    }),
+                });
+                document.getElementById('profitResult').style.display = 'block';
+                document.getElementById('profitSellingPrice').textContent = '₽' + result.selling_price_rub.toLocaleString();
+                document.getElementById('profitCostRub').textContent = '₽' + result.cost_rub.toLocaleString();
+                document.getElementById('profitAmountRub').textContent = '₽' + result.profit_rub.toLocaleString();
+                document.getElementById('profitAmountRub').style.color = result.profit_rub >= 0 ? 'var(--success)' : 'var(--danger)';
+                document.getElementById('profitMargin').textContent = result.profit_margin + '%';
+                document.getElementById('profitMargin').style.color = result.profit_margin >= 0 ? 'var(--success)' : 'var(--danger)';
+            } catch (e) { console.error(e); }
+        }
+
+        // ==================== 系统设置 ====================
+        async function saveSettings() {
+            showToast('设置已保存', 'success');
+        }
+
+        // ==================== 通用 ====================
+        function closeModal() {
+            document.getElementById('modalContainer').innerHTML = '';
+        }
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            loadDashboard();
+        });
+    </script>
+</body>
+</html>

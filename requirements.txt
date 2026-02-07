@@ -1,0 +1,26 @@
+# OZON爬虫系统 - Python依赖
+# 核心框架
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+
+# 浏览器自动化
+playwright==1.49.1
+
+# 数据库
+sqlalchemy==2.0.36
+alembic==1.14.0
+
+# 定时调度
+apscheduler==3.10.4
+
+# 数据导出
+openpyxl==3.1.5
+
+# HTTP客户端
+httpx==0.28.1
+aiohttp==3.11.11
+
+# 工具
+python-multipart==0.0.20
+python-dotenv==1.0.1
