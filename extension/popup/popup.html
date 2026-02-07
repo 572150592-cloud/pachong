@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OZON商品采集助手</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+      width: 360px;
+      min-height: 480px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 13px;
+      color: #333;
+      background: #f8f9fa;
+    }
+    
+    .header {
+      background: linear-gradient(135deg, #005bff 0%, #0041cc 100%);
+      color: white;
+      padding: 16px;
+      text-align: center;
+    }
+    
+    .header h1 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    
+    .header p {
+      font-size: 11px;
+      opacity: 0.8;
+    }
+    
+    .stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      padding: 12px 16px;
+    }
+    
+    .stat-card {
+      background: white;
+      border-radius: 8px;
+      padding: 10px;
+      text-align: center;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    
+    .stat-value {
+      font-size: 20px;
+      font-weight: 700;
+      color: #005bff;
+    }
+    
+    .stat-label {
+      font-size: 11px;
+      color: #666;
+      margin-top: 2px;
+    }
+    
+    .section {
+      padding: 0 16px 12px;
+    }
+    
+    .section-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 8px;
+      padding-bottom: 4px;
+      border-bottom: 2px solid #005bff;
+      display: inline-block;
+    }
+    
+    .form-group {
+      margin-bottom: 8px;
+    }
+    
+    .form-group label {
+      display: block;
+      font-size: 11px;
+      color: #666;
+      margin-bottom: 3px;
+    }
+    
+    textarea, input[type="text"], input[type="number"], select {
+      width: 100%;
+      padding: 6px 10px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 12px;
+      transition: border-color 0.2s;
+    }
+    
+    textarea:focus, input:focus, select:focus {
+      outline: none;
+      border-color: #005bff;
+      box-shadow: 0 0 0 2px rgba(0,91,255,0.1);
+    }
+    
+    textarea {
+      resize: vertical;
+      min-height: 60px;
+    }
+    
+    .row {
+      display: flex;
+      gap: 8px;
+    }
+    
+    .row > * {
+      flex: 1;
+    }
+    
+    .checkbox-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 6px 0;
+    }
+    
+    .checkbox-group label {
+      font-size: 12px;
+      cursor: pointer;
+    }
+    
+    .btn-group {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+    
+    .btn {
+      flex: 1;
+      padding: 8px 12px;
+      border: none;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      min-width: 70px;
+    }
+    
+    .btn-primary {
+      background: #005bff;
+      color: white;
+    }
+    
+    .btn-primary:hover {
+      background: #0041cc;
+    }
+    
+    .btn-danger {
+      background: #ff4444;
+      color: white;
+    }
+    
+    .btn-danger:hover {
+      background: #cc0000;
+    }
+    
+    .btn-secondary {
+      background: #e8e8e8;
+      color: #333;
+    }
+    
+    .btn-secondary:hover {
+      background: #ddd;
+    }
+    
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    .status-bar {
+      padding: 8px 16px;
+      background: #e8f5e9;
+      color: #2e7d32;
+      font-size: 12px;
+      text-align: center;
+      font-weight: 500;
+    }
+    
+    .status-bar.error {
+      background: #fce4ec;
+      color: #c62828;
+    }
+    
+    .status-bar.running {
+      background: #e3f2fd;
+      color: #1565c0;
+    }
+    
+    .server-config {
+      margin-top: 8px;
+      padding: 8px;
+      background: #f5f5f5;
+      border-radius: 6px;
+    }
+    
+    .server-config label {
+      font-size: 11px;
+      color: #666;
+    }
+    
+    .footer {
+      text-align: center;
+      padding: 8px;
+      font-size: 10px;
+      color: #999;
+      border-top: 1px solid #eee;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🔍 OZON商品采集助手</h1>
+    <p>跨境电商数据采集工具 v1.0.0</p>
+  </div>
+  
+  <div id="statusBar" class="status-bar">就绪 - 请在OZON搜索页面使用</div>
+  
+  <div class="stats">
+    <div class="stat-card">
+      <div class="stat-value" id="totalCount">0</div>
+      <div class="stat-label">已采集商品</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="keywordCount">0</div>
+      <div class="stat-label">关键词数</div>
+    </div>
+  </div>
+  
+  <div class="section">
+    <div class="section-title">采集设置</div>
+    
+    <div class="form-group">
+      <label>搜索关键词（每行一个）</label>
+      <textarea id="keywords" placeholder="наушники&#10;телефон&#10;ноутбук"></textarea>
+    </div>
+    
+    <div class="row">
+      <div class="form-group">
+        <label>每个关键词最大采集数</label>
+        <input type="number" id="maxProducts" value="5000" min="100" max="50000">
+      </div>
+      <div class="form-group">
+        <label>切换模式</label>
+        <select id="switchMode">
+          <option value="sequential">顺序采集</option>
+          <option value="quantity">按数量切换</option>
+          <option value="timer">按时间切换</option>
+        </select>
+      </div>
+    </div>
+    
+    <div class="checkbox-group">
+      <input type="checkbox" id="importOnly">
+      <label for="importOnly">仅采集进口商品（OZON Global）</label>
+    </div>
+    
+    <div class="btn-group">
+      <button class="btn btn-primary" id="btnStart">▶ 开始采集</button>
+      <button class="btn btn-danger" id="btnStop" disabled>■ 停止</button>
+    </div>
+  </div>
+  
+  <div class="section">
+    <div class="section-title">数据操作</div>
+    <div class="btn-group">
+      <button class="btn btn-secondary" id="btnExportCSV">📊 导出CSV</button>
+      <button class="btn btn-secondary" id="btnExportJSON">📋 导出JSON</button>
+      <button class="btn btn-secondary" id="btnClear">🗑 清空数据</button>
+    </div>
+    
+    <div class="server-config">
+      <label>后端服务器地址（可选）</label>
+      <div style="display:flex;gap:6px;margin-top:4px;">
+        <input type="text" id="serverUrl" placeholder="http://localhost:8000" style="flex:1;">
+        <button class="btn btn-secondary" id="btnPush" style="flex:none;min-width:auto;">推送</button>
+      </div>
+    </div>
+  </div>
+  
+  <div class="footer">
+    OZON商品采集助手 | 仅供内部使用
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>

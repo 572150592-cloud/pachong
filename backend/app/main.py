@@ -99,6 +99,10 @@ class ExportRequest(BaseModel):
     date_from: Optional[str] = None
     date_to: Optional[str] = None
 
+class ProductBatchCreate(BaseModel):
+    products: List[Dict] = Field(..., description="商品数据列表")
+
+
 class ProfitCalcRequest(BaseModel):
     sku: int
     pdd_price_cny: float = Field(..., description="拼多多采购价（人民币）")
@@ -471,6 +475,84 @@ async def get_product(sku: int):
             "profit_cny": product.profit_cny,
             "extra_data": product.extra_data,
         }
+    finally:
+        db.close()
+
+
+# ==================== 扩展数据接收API ====================
+
+@app.post("/api/products/batch")
+async def batch_create_products(data: ProductBatchCreate):
+    """批量接收Chrome扩展推送的商品数据"""
+    db = SessionLocal()
+    try:
+        created = 0
+        updated = 0
+        for item in data.products:
+            sku = item.get('sku')
+            if not sku:
+                continue
+            
+            existing = db.query(Product).filter(Product.sku == str(sku)).first()
+            if existing:
+                # 更新已有商品
+                for field in ['title', 'price', 'original_price', 'discount_percent',
+                              'image_url', 'product_url', 'category', 'brand',
+                              'rating', 'review_count', 'monthly_sales', 'weekly_sales',
+                              'seller_type', 'seller_name', 'delivery_info',
+                              'paid_promo_days', 'ad_cost_ratio',
+                              'creation_date', 'followers_count',
+                              'follower_min_price', 'follower_min_url',
+                              'length_cm', 'width_cm', 'height_cm', 'weight_g']:
+                    if field in item and item[field]:
+                        setattr(existing, field, item[field])
+                existing.last_scraped_at = datetime.now()
+                updated += 1
+            else:
+                # 创建新商品
+                product = Product(
+                    sku=str(sku),
+                    title=item.get('title', ''),
+                    product_url=item.get('product_url', ''),
+                    image_url=item.get('image_url', ''),
+                    price=item.get('price', 0),
+                    original_price=item.get('original_price', 0),
+                    discount_percent=item.get('discount_percent', 0),
+                    category=item.get('category', ''),
+                    brand=item.get('brand', ''),
+                    rating=item.get('rating', 0),
+                    review_count=item.get('review_count', 0),
+                    monthly_sales=item.get('monthly_sales', 0),
+                    weekly_sales=item.get('weekly_sales', 0),
+                    paid_promo_days=item.get('paid_promo_days', 0),
+                    ad_cost_ratio=item.get('ad_cost_ratio', 0),
+                    seller_type=item.get('seller_type', ''),
+                    seller_name=item.get('seller_name', ''),
+                    delivery_info=item.get('delivery_info', ''),
+                    followers_count=item.get('followers_count', 0),
+                    follower_min_price=item.get('follower_min_price', 0),
+                    follower_min_url=item.get('follower_min_url', ''),
+                    length_cm=item.get('length_cm', 0),
+                    width_cm=item.get('width_cm', 0),
+                    height_cm=item.get('height_cm', 0),
+                    weight_g=item.get('weight_g', 0),
+                    keyword=item.get('keyword', ''),
+                    last_scraped_at=datetime.now(),
+                )
+                db.add(product)
+                created += 1
+        
+        db.commit()
+        return {
+            "message": f"数据接收成功",
+            "created": created,
+            "updated": updated,
+            "total": created + updated,
+        }
+    except Exception as e:
+        db.rollback()
+        logger.error(f"批量接收数据失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
 
