@@ -82,6 +82,7 @@ class TaskCreate(BaseModel):
     switch_mode: str = Field("sequential", description="切换模式: sequential/timer/quantity")
     switch_interval: int = Field(30, description="定时切换间隔（分钟）")
     switch_quantity: int = Field(1000, description="定量切换阈值")
+    fetch_details: bool = Field(False, description="是否获取商品详情页数据（类目、尺寸、重量等）")
 
 class ScheduleCreate(BaseModel):
     name: str = Field(..., description="调度名称")
@@ -309,6 +310,7 @@ async def start_task(data: TaskCreate, background_tasks: BackgroundTasks):
             switch_mode=data.switch_mode,
             switch_interval=data.switch_interval,
             switch_quantity=data.switch_quantity,
+            fetch_details=data.fetch_details,
         )
 
         return {
@@ -431,6 +433,7 @@ async def list_products(
                 "width_cm": p.width_cm,
                 "height_cm": p.height_cm,
                 "weight_g": p.weight_g,
+                "volume_liters": p.volume_liters,
                 "delivery_info": p.delivery_info,
                 "pdd_purchase_price": p.pdd_purchase_price,
                 "profit_rub": p.profit_rub,
@@ -470,6 +473,14 @@ async def get_product(sku: int):
             "width_cm": product.width_cm,
             "height_cm": product.height_cm,
             "weight_g": product.weight_g,
+            "volume_liters": product.volume_liters,
+            "delivery_info": product.delivery_info,
+            "seller_name": product.seller_name,
+            "rating": product.rating,
+            "review_count": product.review_count,
+            "discount_percent": product.discount_percent,
+            "original_price": product.original_price,
+            "follower_min_url": product.follower_min_url,
             "pdd_purchase_price": product.pdd_purchase_price,
             "profit_rub": product.profit_rub,
             "profit_cny": product.profit_cny,

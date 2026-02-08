@@ -3,6 +3,7 @@ OZON爬虫服务层
 管理爬虫任务的执行、状态跟踪和数据存储
 """
 import asyncio
+import json
 import logging
 from datetime import datetime
 from typing import List, Optional, Dict, Callable
@@ -46,8 +47,21 @@ class ScraperService:
         switch_mode: str = "sequential",
         switch_interval: int = 30,
         switch_quantity: int = 1000,
+        fetch_details: bool = False,
     ):
-        """执行采集任务"""
+        """
+        执行采集任务
+
+        Args:
+            keywords: 关键词列表
+            task_ids: 任务ID列表
+            max_products: 每个关键词最大采集数
+            import_only: 是否仅搜索进口商品
+            switch_mode: 切换模式
+            switch_interval: 定时切换间隔（分钟）
+            switch_quantity: 定量切换阈值
+            fetch_details: 是否获取商品详情页数据（类目、尺寸、重量等）
+        """
         self.is_running = True
         self.current_task_ids = task_ids
 
@@ -64,7 +78,7 @@ class ScraperService:
             # 创建爬虫管理器
             self.manager = OzonScraperManager(headless=True)
 
-            # 执行采集
+            # 执行采集（列表页 + 可选的详情页）
             all_products = await self.manager.scrape_keywords(
                 keywords=keywords,
                 max_products_per_keyword=max_products,
@@ -72,6 +86,7 @@ class ScraperService:
                 switch_interval_minutes=switch_interval,
                 switch_quantity=switch_quantity,
                 import_only=import_only,
+                fetch_details=fetch_details,
                 on_progress=self._on_progress,
             )
 
@@ -92,30 +107,10 @@ class ScraperService:
 
                     if existing:
                         # 更新现有记录
-                        for key, value in product_data.items():
-                            if key not in ("sku", "keyword", "scraped_at") and value:
-                                setattr(existing, key, value)
-                        existing.last_scraped_at = datetime.utcnow()
-                        existing.task_id = tid
+                        self._update_product(existing, product_data, tid)
                     else:
                         # 创建新记录
-                        product = Product(
-                            sku=int(product_data.get("sku", 0)),
-                            title=product_data.get("title", ""),
-                            product_url=product_data.get("product_url", ""),
-                            image_url=product_data.get("image_url", ""),
-                            price=product_data.get("price", 0),
-                            original_price=product_data.get("original_price", 0),
-                            discount_percent=product_data.get("discount_percent", 0),
-                            brand=product_data.get("brand", ""),
-                            rating=product_data.get("rating", 0),
-                            review_count=product_data.get("review_count", 0),
-                            delivery_info=product_data.get("delivery_info", ""),
-                            seller_type=product_data.get("seller_type", ""),
-                            keyword=kw,
-                            task_id=tid,
-                            last_scraped_at=datetime.utcnow(),
-                        )
+                        product = self._create_product(product_data, kw, tid)
                         db.add(product)
 
                     saved_count += 1
@@ -158,7 +153,6 @@ class ScraperService:
 
         except Exception as e:
             logger.error(f"采集任务执行出错: {e}", exc_info=True)
-            # 更新任务状态为失败
             for tid in task_ids:
                 task = db.query(ScrapeTask).filter(ScrapeTask.id == tid).first()
                 if task:
@@ -173,13 +167,118 @@ class ScraperService:
             self.current_keyword = ""
             self.progress_info = {}
 
+    def _create_product(self, data: Dict, keyword: str, task_id: Optional[int]) -> Product:
+        """从采集数据创建Product对象"""
+        # 处理characteristics字段 - 转为JSON字符串存储在extra_data中
+        extra = {}
+        if data.get("characteristics"):
+            extra["characteristics"] = data["characteristics"]
+        if data.get("short_characteristics"):
+            extra["short_characteristics"] = data["short_characteristics"]
+        if data.get("images"):
+            extra["images"] = data["images"]
+        if data.get("data_source"):
+            extra["data_source"] = data["data_source"]
+
+        # 解析创建时间
+        creation_date = None
+        if data.get("creation_date"):
+            try:
+                creation_date = datetime.fromisoformat(
+                    data["creation_date"].replace("Z", "+00:00")
+                )
+            except (ValueError, TypeError):
+                pass
+
+        return Product(
+            sku=int(data.get("sku", 0)),
+            title=data.get("title", ""),
+            product_url=data.get("product_url", ""),
+            image_url=data.get("image_url", ""),
+            price=data.get("price", 0),
+            original_price=data.get("original_price", 0),
+            discount_percent=data.get("discount_percent", 0),
+            category=data.get("category", ""),
+            brand=data.get("brand", ""),
+            rating=data.get("rating", 0),
+            review_count=data.get("review_count", 0),
+            seller_type=data.get("seller_type", ""),
+            seller_name=data.get("seller_name", ""),
+            creation_date=creation_date,
+            followers_count=data.get("followers_count", 0),
+            follower_min_price=data.get("follower_min_price", 0),
+            follower_min_url=data.get("follower_min_url", ""),
+            length_cm=data.get("length_cm", 0),
+            width_cm=data.get("width_cm", 0),
+            height_cm=data.get("height_cm", 0),
+            weight_g=data.get("weight_g", 0),
+            volume_liters=data.get("volume_liters", 0),
+            delivery_info=data.get("delivery_info", ""),
+            keyword=keyword,
+            task_id=task_id,
+            extra_data=extra if extra else None,
+            last_scraped_at=datetime.utcnow(),
+        )
+
+    def _update_product(self, product: Product, data: Dict, task_id: Optional[int]):
+        """更新现有Product对象"""
+        # 只更新非空值
+        field_map = {
+            "title": "title",
+            "product_url": "product_url",
+            "image_url": "image_url",
+            "price": "price",
+            "original_price": "original_price",
+            "discount_percent": "discount_percent",
+            "category": "category",
+            "brand": "brand",
+            "rating": "rating",
+            "review_count": "review_count",
+            "seller_type": "seller_type",
+            "seller_name": "seller_name",
+            "followers_count": "followers_count",
+            "follower_min_price": "follower_min_price",
+            "follower_min_url": "follower_min_url",
+            "length_cm": "length_cm",
+            "width_cm": "width_cm",
+            "height_cm": "height_cm",
+            "weight_g": "weight_g",
+            "volume_liters": "volume_liters",
+            "delivery_info": "delivery_info",
+        }
+
+        for data_key, model_key in field_map.items():
+            value = data.get(data_key)
+            if value:
+                setattr(product, model_key, value)
+
+        # 更新创建时间
+        if data.get("creation_date") and not product.creation_date:
+            try:
+                product.creation_date = datetime.fromisoformat(
+                    data["creation_date"].replace("Z", "+00:00")
+                )
+            except (ValueError, TypeError):
+                pass
+
+        # 更新extra_data
+        extra = product.extra_data or {}
+        if data.get("characteristics"):
+            extra["characteristics"] = data["characteristics"]
+        if data.get("images"):
+            extra["images"] = data["images"]
+        if extra:
+            product.extra_data = extra
+
+        product.task_id = task_id
+        product.last_scraped_at = datetime.utcnow()
+
     async def stop_all(self):
         """停止所有采集任务"""
         if self.manager:
             self.manager.cancel()
         self.is_running = False
 
-        # 更新运行中的任务状态
         db = SessionLocal()
         try:
             running_tasks = db.query(ScrapeTask).filter(

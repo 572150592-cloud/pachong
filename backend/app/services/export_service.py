@@ -48,6 +48,7 @@ FIELD_MAP = [
     ("width_cm", "宽度（cm）"),
     ("height_cm", "高度（cm）"),
     ("weight_g", "重量（g）"),
+    ("volume_liters", "体积（L）"),
     ("delivery_info", "配送信息"),
     ("pdd_purchase_price", "拼多多采购价（¥）"),
     ("profit_rub", "利润（₽）"),
