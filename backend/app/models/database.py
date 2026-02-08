@@ -1,6 +1,6 @@
 """
 OZON爬虫系统 - 数据库模型定义
-包含：商品表、关键词表、任务表、调度表、库存快照表、系统配置表
+包含：商品表、关键词表、任务表、调度表、系统配置表
 """
 import datetime
 from sqlalchemy import (
@@ -32,10 +32,8 @@ class Product(Base):
     brand = Column(String(255), comment="品牌")
     rating = Column(Float, comment="评分")
     review_count = Column(Integer, comment="评论数")
-    monthly_sales = Column(Integer, default=0, comment="月销量（估算）")
-    weekly_sales = Column(Integer, default=0, comment="周销量（估算）")
-    sales_estimation_method = Column(String(50), default="", comment="销量估算方法: stock_diff/review_growth/review_total_estimate")
-    sales_confidence = Column(String(20), default="none", comment="销量估算置信度: high/medium/low/none")
+    monthly_sales = Column(Integer, default=0, comment="月销量（BCS数据）")
+    weekly_sales = Column(Integer, default=0, comment="周销量（BCS数据）")
     gmv_rub = Column(Float, default=0, comment="月销售额（卢布）")
     paid_promo_days = Column(Integer, default=0, comment="付费推广参与天数（28天内）")
     ad_cost_ratio = Column(Float, default=0, comment="广告费用占比（%）")
@@ -54,7 +52,6 @@ class Product(Base):
     volume_liters = Column(Float, comment="体积（升）")
     delivery_info = Column(String(255), comment="配送信息")
     stock_quantity = Column(Integer, comment="当前库存数量")
-    stock_status = Column(String(50), comment="库存状态: in_stock/low_stock/out_of_stock")
     pdd_purchase_price = Column(Float, comment="拼多多采购价（人民币）")
     profit_rub = Column(Float, comment="利润（卢布）")
     profit_cny = Column(Float, comment="利润（人民币）")
@@ -62,7 +59,6 @@ class Product(Base):
     task_id = Column(Integer, index=True, comment="关联任务ID")
     extra_data = Column(JSON, comment="额外数据（JSON）")
     last_scraped_at = Column(DateTime, default=datetime.datetime.utcnow, comment="最后采集时间")
-    last_stock_check_at = Column(DateTime, comment="最后库存检查时间")
     created_at = Column(DateTime, default=datetime.datetime.utcnow, comment="创建时间")
     updated_at = Column(DateTime, default=datetime.datetime.utcnow,
                         onupdate=datetime.datetime.utcnow, comment="更新时间")
@@ -70,33 +66,6 @@ class Product(Base):
     __table_args__ = (
         Index("idx_sku_keyword", "sku", "keyword"),
         UniqueConstraint("sku", "keyword", name="uq_sku_keyword"),
-    )
-
-
-class StockSnapshot(Base):
-    """
-    库存快照表
-    
-    记录每次库存检查的结果，用于通过库存变化推算销量。
-    建议每4-6小时检查一次库存，以获得较准确的销量估算。
-    """
-    __tablename__ = "stock_snapshots"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    sku = Column(BigInteger, index=True, nullable=False, comment="OZON商品SKU")
-    stock_quantity = Column(Integer, comment="库存数量")
-    stock_status = Column(String(50), comment="库存状态")
-    stock_text = Column(String(255), comment="原始库存文本")
-    max_cart_quantity = Column(Integer, comment="最大可加购数量")
-    review_count = Column(Integer, comment="当时的评论数")
-    price = Column(Float, comment="当时的价格")
-    orders_text = Column(String(255), comment="订单相关文本")
-    snapshot_time = Column(DateTime, default=datetime.datetime.utcnow,
-                           index=True, comment="快照时间")
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-
-    __table_args__ = (
-        Index("idx_sku_snapshot_time", "sku", "snapshot_time"),
     )
 
 
@@ -126,7 +95,7 @@ class ScrapeTask(Base):
     keyword_id = Column(Integer, index=True, comment="关联关键词ID")
     keyword = Column(String(255), comment="搜索关键词")
     task_type = Column(String(50), default="search",
-                       comment="任务类型: search/detail/stock_track")
+                       comment="任务类型: search/detail")
     status = Column(String(50), default="pending",
                     comment="任务状态: pending/running/completed/failed/cancelled")
     max_products = Column(Integer, default=5000, comment="目标采集数量")

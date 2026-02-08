@@ -1,6 +1,6 @@
 """
 OZON爬虫系统 - FastAPI后端主应用
-v3.2 - 集成评论时间戳销量分析 + BCS数据服务 + freeRest库存追踪
+v4.0 - 精简版：仅保留OZON原生数据 + BCS精确数据
 """
 import os
 import sys
@@ -20,12 +20,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.models.database import (
     init_db, get_db, SessionLocal,
-    Product, Keyword, ScrapeTask, TaskSchedule, SystemConfig, StockSnapshot
+    Product, Keyword, ScrapeTask, TaskSchedule, SystemConfig
 )
 from app.services.scraper_service import ScraperService
 from app.services.export_service import ExportService
 from app.services.scheduler_service import SchedulerService
-from app.services.stock_service import StockService
 from app.services.bcs_service import BCSService
 
 # 配置日志
@@ -46,7 +45,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="OZON智能爬虫系统",
     description="OZON商品数据采集与分析平台 - 支持BCS精确销量数据获取",
-    version="3.2.0",
+    version="4.0.0",
 )
 
 # CORS配置
@@ -62,7 +61,6 @@ app.add_middleware(
 scraper_service = ScraperService()
 export_service = ExportService()
 scheduler_service = SchedulerService()
-stock_service = StockService()
 bcs_service = BCSService()
 
 # ==================== Pydantic模型 ====================
@@ -89,11 +87,6 @@ class TaskCreate(BaseModel):
     switch_quantity: int = Field(1000, description="定量切换阈值")
     fetch_details: bool = Field(False, description="是否获取商品详情页数据（类目、尺寸、重量等）")
 
-class StockTrackRequest(BaseModel):
-    sku_list: Optional[List[str]] = Field(None, description="指定SKU列表")
-    keyword: Optional[str] = Field(None, description="按关键词选择商品")
-    limit: int = Field(100, description="最大追踪商品数", le=1000)
-
 
 class BCSLoginRequest(BaseModel):
     username: str = Field(..., description="BCS账号用户名")
@@ -109,9 +102,6 @@ class BCSFetchRequest(BaseModel):
     keyword: Optional[str] = Field(None, description="按关键词筛选商品")
     limit: int = Field(100, description="最大处理商品数", le=5000)
     include_weight: bool = Field(True, description="是否同时获取重量尺寸数据")
-
-class SalesEstimateRequest(BaseModel):
-    sku: int = Field(..., description="商品SKU")
 
 class ScheduleCreate(BaseModel):
     name: str = Field(..., description="调度名称")
@@ -148,7 +138,7 @@ async def startup_event():
     """应用启动时初始化"""
     init_db()
     scheduler_service.start()
-    logger.info("OZON爬虫系统启动成功 (v2.1 - 含库存追踪)")
+    logger.info("OZON爬虫系统启动成功 (v4.0)")
 
 
 @app.on_event("shutdown")
@@ -156,7 +146,6 @@ async def shutdown_event():
     """应用关闭时清理"""
     scheduler_service.stop()
     await scraper_service.stop_all()
-    await stock_service.stop()
     await bcs_service.close()
     logger.info("OZON爬虫系统已关闭")
 
@@ -173,7 +162,6 @@ async def get_dashboard():
         active_keywords = db.query(Keyword).filter(Keyword.is_active == True).count()
         total_tasks = db.query(ScrapeTask).count()
         running_tasks = db.query(ScrapeTask).filter(ScrapeTask.status == "running").count()
-        total_snapshots = db.query(StockSnapshot).count()
 
         # 有销量数据的商品数
         products_with_sales = db.query(Product).filter(
@@ -197,7 +185,6 @@ async def get_dashboard():
                 "active_keywords": active_keywords,
                 "total_tasks": total_tasks,
                 "running_tasks": running_tasks,
-                "total_snapshots": total_snapshots,
                 "products_with_sales": products_with_sales,
             },
             "recent_products": [
@@ -216,7 +203,6 @@ async def get_dashboard():
                 for t in recent_tasks
             ],
             "scraper_status": scraper_service.get_status(),
-            "stock_tracker_status": stock_service.get_status(),
             "bcs_service_status": bcs_service.get_status(),
         }
     finally:
@@ -315,8 +301,8 @@ async def start_task(data: TaskCreate, background_tasks: BackgroundTasks):
     """启动采集任务"""
     db = SessionLocal()
     try:
-        # 获取关键词列表
         keywords = []
+
         if data.keywords:
             keywords = data.keywords
         elif data.keyword_ids:
@@ -326,7 +312,7 @@ async def start_task(data: TaskCreate, background_tasks: BackgroundTasks):
             keywords = [k.keyword for k in kw_records]
 
         if not keywords:
-            raise HTTPException(status_code=400, detail="请提供至少一个关键词")
+            raise HTTPException(status_code=400, detail="请指定关键词")
 
         # 创建任务记录
         tasks = []
@@ -334,20 +320,18 @@ async def start_task(data: TaskCreate, background_tasks: BackgroundTasks):
             task = ScrapeTask(
                 keyword=kw,
                 task_type="search",
-                status="pending",
                 max_products=data.max_products,
+                status="pending",
             )
             db.add(task)
+            db.commit()
+            db.refresh(task)
             tasks.append(task)
-        db.commit()
 
-        task_ids = [t.id for t in tasks]
-
-        # 在后台启动采集
+        # 后台启动采集
         background_tasks.add_task(
-            scraper_service.run_scrape_task,
+            scraper_service.run_tasks,
             keywords=keywords,
-            task_ids=task_ids,
             max_products=data.max_products,
             import_only=data.import_only,
             switch_mode=data.switch_mode,
@@ -357,9 +341,8 @@ async def start_task(data: TaskCreate, background_tasks: BackgroundTasks):
         )
 
         return {
-            "message": f"采集任务已启动，共 {len(keywords)} 个关键词",
-            "task_ids": task_ids,
-            "keywords": keywords,
+            "message": "采集任务已启动",
+            "tasks": [{"id": t.id, "keyword": t.keyword} for t in tasks],
         }
     finally:
         db.close()
@@ -367,7 +350,7 @@ async def start_task(data: TaskCreate, background_tasks: BackgroundTasks):
 
 @app.post("/api/tasks/stop")
 async def stop_task():
-    """停止采集任务"""
+    """停止所有采集任务"""
     await scraper_service.stop_all()
     return {"message": "采集任务已停止"}
 
@@ -375,28 +358,39 @@ async def stop_task():
 @app.get("/api/tasks")
 async def list_tasks(
     status: Optional[str] = None,
-    limit: int = Query(50, le=200),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
 ):
     """获取任务列表"""
     db = SessionLocal()
     try:
-        query = db.query(ScrapeTask).order_by(ScrapeTask.created_at.desc())
+        query = db.query(ScrapeTask)
         if status:
             query = query.filter(ScrapeTask.status == status)
-        tasks = query.limit(limit).all()
-        return [{
-            "id": t.id,
-            "keyword": t.keyword,
-            "task_type": getattr(t, 'task_type', 'search'),
-            "status": t.status,
-            "max_products": t.max_products,
-            "scraped_count": t.scraped_count,
-            "error_message": t.error_message,
-            "started_at": str(t.started_at) if t.started_at else None,
-            "completed_at": str(t.completed_at) if t.completed_at else None,
-            "duration_seconds": t.duration_seconds,
-            "created_at": str(t.created_at),
-        } for t in tasks]
+
+        total = query.count()
+        tasks = query.order_by(ScrapeTask.created_at.desc()).offset(
+            (page - 1) * page_size
+        ).limit(page_size).all()
+
+        return {
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "data": [{
+                "id": t.id,
+                "keyword": t.keyword,
+                "task_type": t.task_type,
+                "status": t.status,
+                "max_products": t.max_products,
+                "scraped_count": t.scraped_count,
+                "error_message": t.error_message,
+                "started_at": str(t.started_at) if t.started_at else None,
+                "completed_at": str(t.completed_at) if t.completed_at else None,
+                "duration_seconds": t.duration_seconds,
+                "created_at": str(t.created_at),
+            } for t in tasks]
+        }
     finally:
         db.close()
 
@@ -406,7 +400,6 @@ async def get_task_status():
     """获取当前采集状态"""
     return {
         "scraper": scraper_service.get_status(),
-        "stock_tracker": stock_service.get_status(),
     }
 
 
@@ -472,12 +465,10 @@ async def list_products(
                 "review_count": p.review_count,
                 "monthly_sales": p.monthly_sales,
                 "weekly_sales": p.weekly_sales,
-                "sales_estimation_method": getattr(p, 'sales_estimation_method', ''),
-                "sales_confidence": getattr(p, 'sales_confidence', 'none'),
                 "gmv_rub": p.gmv_rub,
                 "paid_promo_days": p.paid_promo_days,
                 "ad_cost_ratio": p.ad_cost_ratio,
-                "is_promoted": getattr(p, 'is_promoted', False),
+                "is_promoted": p.is_promoted,
                 "seller_type": p.seller_type,
                 "seller_name": p.seller_name,
                 "creation_date": str(p.creation_date) if p.creation_date else None,
@@ -490,8 +481,7 @@ async def list_products(
                 "weight_g": p.weight_g,
                 "volume_liters": p.volume_liters,
                 "delivery_info": p.delivery_info,
-                "stock_quantity": getattr(p, 'stock_quantity', None),
-                "stock_status": getattr(p, 'stock_status', None),
+                "stock_quantity": p.stock_quantity,
                 "pdd_purchase_price": p.pdd_purchase_price,
                 "profit_rub": p.profit_rub,
                 "profit_cny": p.profit_cny,
@@ -504,189 +494,52 @@ async def list_products(
 
 
 @app.get("/api/products/{sku}")
-async def get_product(sku: int):
-    """获取单个商品详情"""
+async def get_product_detail(sku: int):
+    """获取商品详情"""
     db = SessionLocal()
     try:
         product = db.query(Product).filter(Product.sku == sku).first()
         if not product:
             raise HTTPException(status_code=404, detail="商品不存在")
+
         return {
+            "id": product.id,
             "sku": product.sku,
             "title": product.title,
             "product_url": product.product_url,
             "image_url": product.image_url,
             "price": product.price,
             "original_price": product.original_price,
+            "discount_percent": product.discount_percent,
             "category": product.category,
             "brand": product.brand,
+            "rating": product.rating,
+            "review_count": product.review_count,
             "monthly_sales": product.monthly_sales,
             "weekly_sales": product.weekly_sales,
-            "sales_estimation_method": getattr(product, 'sales_estimation_method', ''),
-            "sales_confidence": getattr(product, 'sales_confidence', 'none'),
+            "gmv_rub": product.gmv_rub,
+            "paid_promo_days": product.paid_promo_days,
+            "ad_cost_ratio": product.ad_cost_ratio,
+            "is_promoted": product.is_promoted,
             "seller_type": product.seller_type,
+            "seller_name": product.seller_name,
+            "seller_id": product.seller_id,
             "creation_date": str(product.creation_date) if product.creation_date else None,
             "followers_count": product.followers_count,
             "follower_min_price": product.follower_min_price,
+            "follower_min_url": product.follower_min_url,
             "length_cm": product.length_cm,
             "width_cm": product.width_cm,
             "height_cm": product.height_cm,
             "weight_g": product.weight_g,
             "volume_liters": product.volume_liters,
             "delivery_info": product.delivery_info,
-            "seller_name": product.seller_name,
-            "rating": product.rating,
-            "review_count": product.review_count,
-            "discount_percent": product.discount_percent,
-            "follower_min_url": product.follower_min_url,
-            "stock_quantity": getattr(product, 'stock_quantity', None),
-            "stock_status": getattr(product, 'stock_status', None),
+            "stock_quantity": product.stock_quantity,
             "pdd_purchase_price": product.pdd_purchase_price,
             "profit_rub": product.profit_rub,
             "profit_cny": product.profit_cny,
+            "keyword": product.keyword,
             "extra_data": product.extra_data,
-        }
-    finally:
-        db.close()
-
-
-# ==================== 库存追踪与销量估算API ====================
-
-@app.post("/api/stock/track")
-async def start_stock_tracking(data: StockTrackRequest, background_tasks: BackgroundTasks):
-    """
-    启动库存追踪任务
-    
-    通过定期检查商品库存来估算销量。建议每4-6小时运行一次。
-    
-    工作原理：
-    1. 访问每个商品的详情页
-    2. 提取库存数量（"Осталось X шт"）
-    3. 记录库存快照到数据库
-    4. 通过库存变化计算销量估算
-    """
-    if stock_service.is_running:
-        raise HTTPException(status_code=400, detail="库存追踪任务正在运行中")
-
-    background_tasks.add_task(
-        stock_service.track_stock,
-        sku_list=data.sku_list,
-        keyword=data.keyword,
-        limit=data.limit,
-    )
-
-    return {
-        "message": "库存追踪任务已启动",
-        "sku_count": len(data.sku_list) if data.sku_list else "auto",
-    }
-
-
-@app.post("/api/stock/stop")
-async def stop_stock_tracking():
-    """停止库存追踪任务"""
-    await stock_service.stop()
-    return {"message": "库存追踪任务已停止"}
-
-
-@app.get("/api/stock/status")
-async def get_stock_status():
-    """获取库存追踪状态"""
-    return stock_service.get_status()
-
-
-@app.get("/api/stock/snapshots/{sku}")
-async def get_stock_snapshots(
-    sku: int,
-    days: int = Query(30, description="查询天数", le=365),
-):
-    """获取指定商品的库存快照历史"""
-    db = SessionLocal()
-    try:
-        history = stock_service.get_stock_history(db, sku, days)
-        return {
-            "sku": sku,
-            "days": days,
-            "snapshots": history,
-            "total": len(history),
-        }
-    finally:
-        db.close()
-
-
-@app.post("/api/stock/estimate")
-async def estimate_sales(data: SalesEstimateRequest):
-    """
-    手动触发单个商品的销量估算
-    
-    基于已有的库存快照数据计算周/月销量。
-    如果没有库存快照，会使用评论数推算法。
-    """
-    db = SessionLocal()
-    try:
-        result = stock_service.estimate_sales_for_product(db, data.sku)
-        return {
-            "sku": data.sku,
-            **result,
-        }
-    finally:
-        db.close()
-
-
-@app.get("/api/stock/sales")
-async def get_sales_data(
-    keyword: Optional[str] = None,
-    min_weekly_sales: Optional[int] = None,
-    min_monthly_sales: Optional[int] = None,
-    sort_by: str = Query("monthly_sales", description="排序字段"),
-    sort_order: str = Query("desc", description="排序方向"),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=200),
-):
-    """
-    查询有销量数据的商品
-    
-    返回已估算销量的商品列表，支持按销量排序和筛选。
-    """
-    db = SessionLocal()
-    try:
-        query = db.query(Product).filter(
-            (Product.weekly_sales > 0) | (Product.monthly_sales > 0)
-        )
-
-        if keyword:
-            query = query.filter(Product.keyword.ilike(f"%{keyword}%"))
-        if min_weekly_sales:
-            query = query.filter(Product.weekly_sales >= min_weekly_sales)
-        if min_monthly_sales:
-            query = query.filter(Product.monthly_sales >= min_monthly_sales)
-
-        total = query.count()
-
-        sort_col = getattr(Product, sort_by, Product.monthly_sales)
-        if sort_order == "desc":
-            query = query.order_by(sort_col.desc())
-        else:
-            query = query.order_by(sort_col.asc())
-
-        products = query.offset((page - 1) * page_size).limit(page_size).all()
-
-        return {
-            "total": total,
-            "page": page,
-            "page_size": page_size,
-            "data": [{
-                "sku": p.sku,
-                "title": p.title,
-                "price": p.price,
-                "weekly_sales": p.weekly_sales,
-                "monthly_sales": p.monthly_sales,
-                "sales_estimation_method": getattr(p, 'sales_estimation_method', ''),
-                "sales_confidence": getattr(p, 'sales_confidence', 'none'),
-                "gmv_rub": p.gmv_rub,
-                "review_count": p.review_count,
-                "stock_quantity": getattr(p, 'stock_quantity', None),
-                "keyword": p.keyword,
-            } for p in products]
         }
     finally:
         db.close()
@@ -909,67 +762,6 @@ async def bcs_get_single_sales(sku: str):
         data["weight_g"] = weight.get("weight_g", 0)
     
     return data
-
-
-# ==================== 评论销量分析API ====================
-
-class ReviewAnalyzeRequest(BaseModel):
-    sku_list: Optional[List[str]] = Field(None, description="指定SKU列表")
-    keyword: Optional[str] = Field(None, description="按关键词筛选商品")
-    limit: int = Field(50, description="最大分析商品数", le=500)
-    days: int = Field(7, description="分析天数范围")
-    review_rate: float = Field(0.03, description="留评率（默认3%）")
-
-
-@app.post("/api/reviews/analyze")
-async def analyze_reviews_for_sales(
-    data: ReviewAnalyzeRequest,
-    background_tasks: BackgroundTasks
-):
-    """
-    通过评论时间戳分析商品销售活跃度
-    
-    原理：获取OZON评论API中每条评论的精确时间戳（createdAt），
-    统计近N天内的新评论数，基于留评率估算销量。
-    
-    这是目前从OZON前端判断竞品"近7天有无销售"最可靠的方法。
-    """
-    return JSONResponse({
-        "status": "started",
-        "message": "评论销量分析任务已启动",
-        "params": {
-            "sku_count": len(data.sku_list) if data.sku_list else "auto",
-            "keyword": data.keyword,
-            "days": data.days,
-            "review_rate": data.review_rate,
-        },
-        "note": "分析结果将更新到商品数据中，通过 GET /api/products 查看"
-    })
-
-
-@app.get("/api/reviews/analyze/{sku}")
-async def analyze_single_product_reviews(sku: str, days: int = 7):
-    """
-    分析单个商品的评论时间戳，判断近N天有无销售
-    
-    返回：
-    - has_sales_in_period: 近N天是否有销售
-    - reviews_in_period: 近N天的评论数
-    - estimated_weekly_sales: 估算周销量
-    - estimated_monthly_sales: 估算月销量
-    - confidence: 置信度
-    """
-    return JSONResponse({
-        "sku": sku,
-        "days": days,
-        "message": "请使用Playwright浏览器环境运行评论分析，参见 review_sales_analyzer.py",
-        "usage": {
-            "module": "backend/app/scrapers/review_sales_analyzer.py",
-            "class": "ReviewSalesAnalyzer",
-            "method": "analyze_product(sku, days)",
-            "requires": "已登录的Playwright BrowserContext"
-        }
-    })
 
 
 # ==================== 数据导出API ====================
