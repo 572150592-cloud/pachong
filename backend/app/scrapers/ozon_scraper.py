@@ -468,6 +468,32 @@ class OzonScraper:
             if not title:
                 title = item.get("title", "") or item.get("name", "")
 
+            # 检测付费推广标记
+            is_promoted = False
+            label = item.get("label", {}) or {}
+            label_items = label.get("items", []) or []
+            for li in label_items:
+                li_text = str(li.get("title", "")).lower()
+                if any(w in li_text for w in ["реклама", "спонс", "продвиж", "promo"]):
+                    is_promoted = True
+                    break
+            # 也检查topLabel
+            top_label = item.get("topLabel", {}) or {}
+            if top_label:
+                tl_text = str(top_label.get("text", "") or top_label.get("title", "")).lower()
+                if any(w in tl_text for w in ["реклама", "спонс", "продвиж", "promo"]):
+                    is_promoted = True
+
+            # 提取订单/购买数量文本（如果有）
+            orders_text = ""
+            for state in main_state:
+                atom = state.get("atom", {})
+                text_atom = atom.get("textAtom", {})
+                if text_atom:
+                    t = text_atom.get("text", "")
+                    if re.search(r'\d+.*(?:заказ|покуп|куплен|продан|раз)', t, re.I):
+                        orders_text = t
+
             return {
                 "sku": sku,
                 "title": title[:500],
@@ -481,6 +507,8 @@ class OzonScraper:
                 "review_count": review_count,
                 "delivery_info": delivery_info,
                 "seller_type": seller_type,
+                "is_promoted": is_promoted,
+                "orders_text": orders_text,
                 "keyword": keyword,
                 "scraped_at": datetime.now().isoformat(),
                 "data_source": "composer-api",
@@ -754,6 +782,11 @@ class OzonScraper:
             "characteristics": {},
             "short_characteristics": [],
             "delivery_info": "",
+            "stock_quantity": None,
+            "stock_status": "",
+            "is_promoted": False,
+            "orders_text": "",
+            "estimated_total_sales": 0,
             "extra_data": {},
         }
 
@@ -855,6 +888,30 @@ class OzonScraper:
                 elif "webReviewProductScore" in key:
                     detail["rating"] = float(value.get("score", 0) or value.get("rating", 0) or 0)
                     detail["review_count"] = int(value.get("count", 0) or value.get("totalCount", 0) or 0)
+
+                # 解析加购按钮中的库存限制
+                elif "addToCart" in key.lower() or "webAddToCart" in key:
+                    max_qty = value.get("maxQuantity") or value.get("limit") or value.get("maxCount")
+                    if max_qty:
+                        detail["stock_quantity"] = int(max_qty)
+                    # 检查是否缺货
+                    if value.get("isOutOfStock") or value.get("outOfStock"):
+                        detail["stock_quantity"] = 0
+                        detail["stock_status"] = "out_of_stock"
+
+                # 解析推广/广告标记
+                elif "webStickyProducts" in key or "webPromo" in key:
+                    detail["is_promoted"] = True
+
+                # 解析"已购买"等销量提示
+                elif "webSocialProof" in key or "webPopularity" in key:
+                    proof_text = str(value)
+                    orders_match = re.search(r'(\d[\d\s]*)\s*(?:заказ|покуп|куплен|продан|раз)', proof_text, re.I)
+                    if orders_match:
+                        detail["orders_text"] = orders_match.group(0)
+                    bought_match = re.search(r'[Кк]упили\s+(\d[\d\s]*)\s*раз', proof_text)
+                    if bought_match:
+                        detail["estimated_total_sales"] = int(bought_match.group(1).replace(' ', ''))
 
                 # 解析简要特征
                 elif "webShortCharacteristicsValue" in key:

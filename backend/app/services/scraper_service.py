@@ -236,6 +236,7 @@ class ScraperService:
             "review_count": "review_count",
             "seller_type": "seller_type",
             "seller_name": "seller_name",
+            "seller_id": "seller_id",
             "followers_count": "followers_count",
             "follower_min_price": "follower_min_price",
             "follower_min_url": "follower_min_url",
@@ -245,6 +246,9 @@ class ScraperService:
             "weight_g": "weight_g",
             "volume_liters": "volume_liters",
             "delivery_info": "delivery_info",
+            "stock_quantity": "stock_quantity",
+            "stock_status": "stock_status",
+            "is_promoted": "is_promoted",
         }
 
         for data_key, model_key in field_map.items():
