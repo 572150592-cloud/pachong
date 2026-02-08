@@ -1,6 +1,6 @@
 """
 OZON爬虫系统 - FastAPI后端主应用
-v2.1 - 新增库存追踪与销量估算功能
+v3.0 - 集成BCS数据服务，支持精确销量数据获取
 """
 import os
 import sys
@@ -26,6 +26,7 @@ from app.services.scraper_service import ScraperService
 from app.services.export_service import ExportService
 from app.services.scheduler_service import SchedulerService
 from app.services.stock_service import StockService
+from app.services.bcs_service import BCSService
 
 # 配置日志
 logging.basicConfig(
@@ -44,8 +45,8 @@ logger = logging.getLogger(__name__)
 # 创建FastAPI应用
 app = FastAPI(
     title="OZON智能爬虫系统",
-    description="OZON商品数据采集与分析平台 - 支持库存追踪与销量估算",
-    version="2.1.0",
+    description="OZON商品数据采集与分析平台 - 支持BCS精确销量数据获取",
+    version="3.0.0",
 )
 
 # CORS配置
@@ -62,6 +63,7 @@ scraper_service = ScraperService()
 export_service = ExportService()
 scheduler_service = SchedulerService()
 stock_service = StockService()
+bcs_service = BCSService()
 
 # ==================== Pydantic模型 ====================
 
@@ -91,6 +93,22 @@ class StockTrackRequest(BaseModel):
     sku_list: Optional[List[str]] = Field(None, description="指定SKU列表")
     keyword: Optional[str] = Field(None, description="按关键词选择商品")
     limit: int = Field(100, description="最大追踪商品数", le=1000)
+
+
+class BCSLoginRequest(BaseModel):
+    username: str = Field(..., description="BCS账号用户名")
+    password: str = Field(..., description="BCS账号密码")
+
+
+class BCSTokenRequest(BaseModel):
+    token: str = Field(..., description="BCS认证token")
+
+
+class BCSFetchRequest(BaseModel):
+    sku_list: Optional[List[str]] = Field(None, description="指定SKU列表")
+    keyword: Optional[str] = Field(None, description="按关键词筛选商品")
+    limit: int = Field(100, description="最大处理商品数", le=5000)
+    include_weight: bool = Field(True, description="是否同时获取重量尺寸数据")
 
 class SalesEstimateRequest(BaseModel):
     sku: int = Field(..., description="商品SKU")
@@ -139,6 +157,7 @@ async def shutdown_event():
     scheduler_service.stop()
     await scraper_service.stop_all()
     await stock_service.stop()
+    await bcs_service.close()
     logger.info("OZON爬虫系统已关闭")
 
 
@@ -198,6 +217,7 @@ async def get_dashboard():
             ],
             "scraper_status": scraper_service.get_status(),
             "stock_tracker_status": stock_service.get_status(),
+            "bcs_service_status": bcs_service.get_status(),
         }
     finally:
         db.close()
@@ -787,6 +807,108 @@ async def calculate_profit(data: ProfitCalcRequest):
         }
     finally:
         db.close()
+
+
+# ==================== BCS数据服务API ====================
+
+@app.post("/api/bcs/login")
+async def bcs_login(data: BCSLoginRequest):
+    """
+    登录BCS数据服务
+    
+    BCS (www.bcserp.com) 是第三方OZON数据分析平台，
+    提供精确的商品销量、推广、尺寸重量等数据。
+    登录后可使用BCS API获取这些数据。
+    """
+    success = await bcs_service.login(data.username, data.password)
+    if success:
+        return {"message": "BCS登录成功", "status": "logged_in"}
+    else:
+        raise HTTPException(status_code=401, detail="BCS登录失败，请检查用户名和密码")
+
+
+@app.post("/api/bcs/token")
+async def bcs_set_token(data: BCSTokenRequest):
+    """
+    直接设置BCS认证token
+    
+    如果已有BCS的认证token（例如从浏览器插件中获取），
+    可以直接设置，无需重新登录。
+    """
+    bcs_service.set_token(data.token)
+    return {"message": "BCS token设置成功", "status": "logged_in"}
+
+
+@app.post("/api/bcs/fetch-sales")
+async def bcs_fetch_sales(data: BCSFetchRequest, background_tasks: BackgroundTasks):
+    """
+    从BCS获取商品销量和重量数据
+    
+    通过BCS API获取精确的周销量、月销量、推广数据、尺寸重量等，
+    并自动更新到数据库中。
+    
+    返回字段包括：
+    - 周销量 (weekly_sales)
+    - 月销量 (monthly_sales)
+    - 付费推广天数 (days_with_ads) - 28天内
+    - 广告费用占比 (ad_cost_ratio / DRR%)
+    - 卖家类型 (seller_type / FBO/FBS)
+    - 商品创建时间 (creation_date)
+    - 长宽高重量 (length/width/height/weight)
+    - 以及更多运营数据...
+    """
+    if not bcs_service.is_logged_in:
+        raise HTTPException(status_code=401, detail="请先登录BCS服务")
+    
+    if bcs_service.is_running:
+        raise HTTPException(status_code=400, detail="BCS数据获取任务正在运行中")
+
+    background_tasks.add_task(
+        bcs_service.fetch_sales_for_products,
+        sku_list=data.sku_list,
+        keyword=data.keyword,
+        limit=data.limit,
+        include_weight=data.include_weight,
+    )
+
+    return {
+        "message": "BCS数据获取任务已启动",
+        "sku_count": len(data.sku_list) if data.sku_list else "auto",
+        "include_weight": data.include_weight,
+    }
+
+
+@app.get("/api/bcs/status")
+async def bcs_status():
+    """获取BCS服务状态"""
+    return bcs_service.get_status()
+
+
+@app.post("/api/bcs/stop")
+async def bcs_stop():
+    """停止BCS数据获取任务"""
+    await bcs_service.stop()
+    return {"message": "BCS数据获取任务已停止"}
+
+
+@app.get("/api/bcs/sales/{sku}")
+async def bcs_get_single_sales(sku: str):
+    """
+    获取单个商品的BCS销量数据（实时查询，不写入数据库）
+    """
+    if not bcs_service.is_logged_in:
+        raise HTTPException(status_code=401, detail="请先登录BCS服务")
+    
+    data = await bcs_service.client.get_full_sales_info(sku)
+    weight = await bcs_service.client.get_weight_data(sku)
+    
+    if weight:
+        data["length_mm"] = weight.get("length_mm", 0)
+        data["width_mm"] = weight.get("width_mm", 0)
+        data["height_mm"] = weight.get("height_mm", 0)
+        data["weight_g"] = weight.get("weight_g", 0)
+    
+    return data
 
 
 # ==================== 数据导出API ====================

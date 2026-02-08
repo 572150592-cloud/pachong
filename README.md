@@ -1,439 +1,307 @@
-# OZON 智能爬虫系统 v2.1
+# OZON 智能爬虫系统 v3.0
 
-> 面向跨境电商团队的OZON商品数据采集与分析平台，支持关键词批量采集、商品详情深度采集、**库存追踪与销量估算**、定时调度、数据导出和利润计算。
+> 面向跨境电商团队的OZON商品数据采集与分析平台，支持关键词批量采集、商品详情深度采集、**BCS精确销量数据获取**、库存追踪与销量估算、定时调度、数据导出和利润计算。
 
-## v2.1 更新说明
+## v3.0 更新说明
 
-- **库存追踪模块**：新增 `StockTracker`，通过定期监控商品库存变化来估算周/月销量
-- **销量估算引擎**：新增 `SalesEstimator`，支持库存差值法、评论增长法、评论总量推算法三种估算方式
-- **库存快照表**：新增 `stock_snapshots` 数据库表，记录每次库存检查的结果
-- **推广标记检测**：搜索结果中自动识别付费推广（Реклама）商品
-- **库存追踪API**：新增 `/api/stock/*` 系列接口，支持库存追踪任务管理和销量查询
-- **仪表板增强**：新增库存快照统计和有销量数据的商品统计
+- **BCS数据服务集成**：通过逆向BCS Chrome插件，发现并集成其后端API，实现精确的周销量、月销量、推广数据、尺寸重量等数据获取
+- **19个目标字段全部实现**：SKU、标题、图片、链接、价格、类目、付费推广(28天)、广告费用占比、周销量、月销量、卖家类型、创建时间、被跟数量、被跟最低价、被跟最低价链接、长度、宽度、高度、重量
+- **BCS API路由**：新增 `/api/bcs/*` 系列接口，支持BCS登录、销量获取、重量查询
+- **双重销量方案**：BCS精确数据（推荐） + 库存追踪估算（备选）
+
+## 核心问题解决：周销量和月销量
+
+OZON前端页面**不直接显示**竞品的销量数字。本系统通过两种方案解决：
+
+### 方案一：BCS精确数据（推荐）
+
+通过逆向分析BCS Ozon Plus Chrome插件，发现其调用 `ozon.bcserp.com` 后端API获取销量数据。BCS作为专业的OZON数据分析平台，通过长期大规模数据采集积累了全平台商品的精确销量数据。
+
+| 数据字段 | BCS API字段 | 说明 |
+|---------|------------|------|
+| 周销量 | monthsales (period=weekly) | 精确的7天销售数据 |
+| 月销量 | monthsales | 精确的30天销售数据 |
+| 付费推广天数 | daysWithTrafarets | 28天内参与推广的天数 |
+| 广告费用占比 | drr | DRR% 广告投入产出比 |
+| 卖家类型 | sources | FBO/FBS/Ozon等 |
+| 商品创建时间 | createDate | 商品上架日期 |
+| 长度 | key=9454 | 单位mm |
+| 宽度 | key=9455 | 单位mm |
+| 高度 | key=9456 | 单位mm |
+| 重量 | key=4497 | 单位g |
+| 月销售额 GMV | gmvSum | 月度总销售额 |
+| 展示量/点击量 | views/sessioncount | 流量数据 |
+| 转化率 | convViewToOrder | 展示到下单转化率 |
+
+### 方案二：库存追踪估算（无需BCS账号）
+
+通过定期监控商品库存变化来估算销量，支持三种估算方法：
+- **库存差值法**（最准确）：定期记录库存，通过库存减少量推算销量
+- **评论增长法**（中等）：通过评论数增长反推销量
+- **评论总量推算法**（粗略）：通过总评论数和上架时间估算
+
+## 19个目标字段完成状态
+
+| # | 字段 | 数据来源 | 状态 |
+|---|------|---------|------|
+| 1 | SKU | OZON搜索/详情页 | ✅ |
+| 2 | 商品标题 | OZON搜索/详情页 | ✅ |
+| 3 | 商品图片 | OZON搜索/详情页 | ✅ |
+| 4 | 商品链接 | OZON搜索/详情页 | ✅ |
+| 5 | 价格 | OZON搜索/详情页 | ✅ |
+| 6 | 类目 | OZON详情页 / BCS API | ✅ |
+| 7 | 付费推广(28天) | BCS API (daysWithTrafarets) | ✅ |
+| 8 | 广告费用占比 | BCS API (drr) | ✅ |
+| 9 | 周销量 | BCS API (period=weekly) | ✅ |
+| 10 | 月销量 | BCS API (monthsales) | ✅ |
+| 11 | 卖家类型 | BCS API (sources) | ✅ |
+| 12 | 商品创建时间 | BCS API (createDate) | ✅ |
+| 13 | 被跟数量 | OZON entrypoint-api | ✅ |
+| 14 | 被跟最低价 | OZON entrypoint-api | ✅ |
+| 15 | 被跟最低价链接 | OZON entrypoint-api | ✅ |
+| 16 | 长度 | BCS API (key=9454) | ✅ |
+| 17 | 宽度 | BCS API (key=9455) | ✅ |
+| 18 | 高度 | BCS API (key=9456) | ✅ |
+| 19 | 重量 | BCS API (key=4497) | ✅ |
 
 ## 系统架构
 
 ```
 pachong/
-├── backend/                    # 后端服务
+├── backend/
 │   └── app/
-│       ├── core/               # 核心配置
-│       │   └── config.py       # 系统配置
-│       ├── models/             # 数据模型
-│       │   └── database.py     # SQLAlchemy模型（含StockSnapshot表）
-│       ├── scrapers/           # 爬虫引擎
-│       │   ├── ozon_scraper.py # OZON爬虫核心（v2.0 重写）
-│       │   └── stock_tracker.py # 库存追踪与销量估算引擎（v2.1 新增）
-│       ├── services/           # 业务服务
-│       │   ├── scraper_service.py   # 爬虫服务
-│       │   ├── stock_service.py     # 库存追踪服务（v2.1 新增）
-│       │   ├── export_service.py    # 导出服务
-│       │   └── scheduler_service.py # 调度服务
-│       └── main.py             # FastAPI主应用
-├── frontend/                   # 前端界面
-│   └── index.html              # Web管理界面
-├── data/                       # 数据目录
-│   └── exports/                # 导出文件
-├── logs/                       # 日志目录
-├── docs/                       # 开发文档
-│   └── DEVELOPMENT.md          # 详细开发文档
-├── Dockerfile                  # Docker镜像
-├── docker-compose.yml          # Docker编排
-├── requirements.txt            # Python依赖
-├── start.py                    # 启动脚本
-└── README.md                   # 项目文档
+│       ├── core/
+│       │   └── config.py               # 系统配置
+│       ├── models/
+│       │   └── database.py             # 数据库模型（含StockSnapshot表）
+│       ├── scrapers/
+│       │   ├── ozon_scraper.py         # OZON爬虫核心引擎
+│       │   ├── bcs_data_service.py     # BCS数据服务模块 (v3.0新增)
+│       │   └── stock_tracker.py        # 库存追踪与销量估算引擎
+│       ├── services/
+│       │   ├── scraper_service.py      # 爬虫业务服务
+│       │   ├── bcs_service.py          # BCS业务服务 (v3.0新增)
+│       │   ├── stock_service.py        # 库存追踪服务
+│       │   ├── export_service.py       # 导出服务
+│       │   └── scheduler_service.py    # 调度服务
+│       └── main.py                     # FastAPI主应用 (v3.0)
+├── frontend/
+│   └── index.html                      # Web管理界面
+├── data/exports/                       # 导出文件
+├── logs/                               # 日志目录
+├── docs/DEVELOPMENT.md                 # 详细开发文档
+├── Dockerfile
+├── docker-compose.yml
+├── requirements.txt
+├── start.py
+└── README.md
 ```
-
-## 核心功能
-
-### 1. OZON商品数据采集
-
-- **关键词搜索采集**：输入俄语关键词，自动搜索并采集商品数据
-- **composer-api拦截**：直接获取OZON内部结构化JSON数据，数据准确性高
-- **详情页深度采集**：可选开启，逐个访问商品详情页获取完整特征数据
-- **无限滚动加载**：自动滚动页面，持续加载新商品，单次最多采集50,000件
-- **智能反爬策略**：随机UA、请求延迟、平滑滚动、反检测脚本注入
-- **推广标记检测**：自动识别搜索结果中的付费推广（Реклама）商品
-
-### 2. 库存追踪与销量估算（v2.1 新增）
-
-OZON官方不提供查询竞品销量的公开接口。本系统通过**库存追踪法**来估算竞品的周销量和月销量。
-
-#### 工作原理
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    销量估算流程                           │
-├─────────────────────────────────────────────────────────┤
-│                                                         │
-│  1. 定时库存检查（建议每4-6小时）                         │
-│     │                                                   │
-│     ├─→ 访问商品详情页                                   │
-│     ├─→ 提取"Осталось X шт"（剩余X件）                  │
-│     ├─→ 提取加购按钮的maxQuantity限制                    │
-│     ├─→ 记录评论数变化                                   │
-│     └─→ 保存库存快照到 stock_snapshots 表                │
-│                                                         │
-│  2. 销量估算计算                                         │
-│     │                                                   │
-│     ├─→ 方法A: 库存差值法（最准确）                       │
-│     │   库存减少量 = 前一次库存 - 当前库存                 │
-│     │   自动检测补货（库存突然增加）并排除                  │
-│     │                                                   │
-│     ├─→ 方法B: 评论增长法（中等准确）                     │
-│     │   周销量 ≈ 评论增长数 / 评论转化率(2%)              │
-│     │                                                   │
-│     └─→ 方法C: 评论总量推算法（粗略估算）                 │
-│         总销量 ≈ 总评论数 / 2%                           │
-│         月销量 ≈ 总销量 / 上架天数 × 30                  │
-│                                                         │
-│  3. 优先级：A > B > C                                    │
-│     库存数据充足时用A，不足时用B补充，都没有时用C          │
-│                                                         │
-└─────────────────────────────────────────────────────────┘
-```
-
-#### 销量估算置信度
-
-| 置信度 | 条件 | 说明 |
-|--------|------|------|
-| **high** | ≥10个库存快照 | 数据点充足，估算较准确 |
-| **medium** | 5-9个库存快照 | 数据点一般，估算可参考 |
-| **low** | <5个快照或仅用评论法 | 数据不足，仅供参考 |
-| **none** | 无任何数据 | 无法估算 |
-
-#### 使用方式
-
-```bash
-# 1. 先采集商品数据
-curl -X POST http://localhost:8000/api/tasks/start \
-  -H "Content-Type: application/json" \
-  -d '{"keywords": ["наушники"], "max_products": 100, "fetch_details": true}'
-
-# 2. 启动库存追踪（建议每4-6小时运行一次）
-curl -X POST http://localhost:8000/api/stock/track \
-  -H "Content-Type: application/json" \
-  -d '{"keyword": "наушники", "limit": 100}'
-
-# 3. 查询销量数据
-curl http://localhost:8000/api/stock/sales?keyword=наушники&sort_by=monthly_sales
-
-# 4. 查看单个商品的库存历史
-curl http://localhost:8000/api/stock/snapshots/12345678?days=30
-
-# 5. 手动触发单个商品的销量估算
-curl -X POST http://localhost:8000/api/stock/estimate \
-  -H "Content-Type: application/json" \
-  -d '{"sku": 12345678}'
-```
-
-> **重要提示**：库存追踪法需要**持续运行一段时间**才能积累足够的数据点。建议至少运行3天以上（每4-6小时一次），才能获得较准确的周销量估算。月销量需要运行更长时间。
-
-### 3. 采集数据字段
-
-#### 可直接获取的字段（来自OZON公开页面）
-
-| 字段 | 说明 | 数据来源 | 采集阶段 |
-|------|------|----------|----------|
-| SKU | 商品唯一标识 | 商品URL | 列表页 |
-| 商品标题 | 完整商品名称 | `webProductHeading` widget | 列表页/详情页 |
-| 商品图片 | 主图URL | `tileImage` / `webGallery` widget | 列表页/详情页 |
-| 商品链接 | 商品详情页URL | `action.link` | 列表页 |
-| 价格 | 当前售价（₽） | `priceAtom` / `webPrice` widget | 列表页/详情页 |
-| 原价 | 折扣前价格（₽） | `priceAtom.originalPrice` | 列表页/详情页 |
-| 折扣 | 折扣百分比 | `tagAtom` | 列表页 |
-| 类目 | 完整分类路径 | `breadCrumbs` widget | 详情页 |
-| 品牌 | 品牌名称 | `webLongCharacteristics` / SEO JSON-LD | 详情页 |
-| 评分 | 商品评分（1-5） | `webReviewProductScore` widget | 列表页/详情页 |
-| 评论数 | 评论数量 | `webReviewProductScore` widget | 列表页/详情页 |
-| 卖家类型 | Ozon自营/FBO/FBS/第三方 | `webCurrentSeller` widget | 列表页/详情页 |
-| 卖家名称 | 卖家店铺名 | `webCurrentSeller` widget | 详情页 |
-| 商品创建时间 | 上架日期 | SEO `datePublished` | 详情页 |
-| 被跟卖数量 | 跟卖卖家数 | `cellList` widget | 详情页 |
-| 被跟最低价 | 跟卖最低价格（₽） | `cellList` widget | 详情页 |
-| 被跟最低价链接 | 最低价商品链接 | `cellList` widget | 详情页 |
-| 长度 | 商品长度（cm） | `webLongCharacteristics` - `Длина` | 详情页 |
-| 宽度 | 商品宽度（cm） | `webLongCharacteristics` - `Ширина` | 详情页 |
-| 高度 | 商品高度（cm） | `webLongCharacteristics` - `Высота` | 详情页 |
-| 重量 | 商品重量（g） | `webLongCharacteristics` - `Вес` | 详情页 |
-| 体积 | 商品体积（L） | `webLongCharacteristics` - `Объем` | 详情页 |
-| 付费推广标记 | 是否为推广商品 | `label` / `topLabel` 中的"Реклама" | 列表页 |
-| 库存数量 | 当前库存 | `webAddToCart` / 页面文本 | 详情页/库存追踪 |
-
-#### 通过库存追踪估算的字段（v2.1 新增）
-
-| 字段 | 说明 | 获取方式 |
-|------|------|----------|
-| 周销量 | 近7天估算销量 | 库存差值法 / 评论增长法 |
-| 月销量 | 近30天估算销量 | 库存差值法 / 评论增长法 |
-| 月销售额 | 月销量 × 价格 | 自动计算 |
-| 销量估算方法 | stock_diff / review_growth / review_total_estimate | 自动标注 |
-| 销量置信度 | high / medium / low / none | 根据数据点数量判断 |
-
-#### 仍需第三方服务的字段
-
-| 字段 | 说明 | 获取方式 |
-|------|------|----------|
-| 付费推广（28天参与天数） | 精确的推广天数 | 需第三方数据服务（如MPStats、SellerStats） |
-| 广告费用占比 | 广告成本比例 | 需第三方数据服务 |
-
-> **说明**：付费推广的**是否参与**可以通过搜索结果中的"Реклама"标记检测到，但精确的28天参与天数和广告费用占比仍需第三方数据服务。本系统已预留 `paid_promo_days` 和 `ad_cost_ratio` 字段，可通过 `/api/products/batch` 接口接收外部数据补充。
-
-### 4. 任务调度
-
-- **顺序模式**：按关键词顺序逐个采集，每个采集到目标数量后切换
-- **定时切换**：每个关键词采集指定时间后自动切换到下一个
-- **定量切换**：每个关键词采集指定数量后自动切换
-- **Cron定时**：支持Cron表达式配置定时自动采集
-
-### 5. 数据导出
-
-- **Excel导出**：带格式的.xlsx文件，含表头样式和冻结首行
-- **CSV导出**：UTF-8编码，兼容Excel打开
-- **JSON导出**：结构化JSON数据
-
-### 6. 利润计算
-
-- 输入拼多多采购价，自动计算利润
-- 支持自定义运费、佣金率、汇率
-- 计算结果自动保存到数据库
 
 ## 快速开始
 
-### 方式一：Docker部署（推荐）
+### 安装
 
 ```bash
 # 克隆项目
 git clone https://github.com/572150592-cloud/pachong.git
 cd pachong
 
-# 启动服务
-docker-compose up -d
-
-# 访问管理界面
-# http://localhost:8000
-```
-
-### 方式二：本地运行
-
-```bash
-# 1. 安装Python依赖
+# 安装依赖
 pip install -r requirements.txt
-
-# 2. 安装Playwright浏览器
 playwright install chromium
-playwright install-deps chromium
 
-# 3. 创建必要目录
-mkdir -p data/exports logs
-
-# 4. 启动服务
-python start.py
-# 或
+# 启动服务
 cd backend && python -m app.main
-
-# 5. 访问管理界面
-# http://localhost:8000
-# API文档: http://localhost:8000/docs
+# 访问 http://localhost:8000 和 http://localhost:8000/docs
 ```
 
-## 使用指南
-
-### 快速采集（仅列表页，速度快）
+### Docker部署
 
 ```bash
+docker-compose up -d
+```
+
+## API使用指南
+
+### 方案一：BCS精确销量数据（推荐）
+
+**前提条件**：需要有BCS (www.bcserp.com) 的账号。
+
+```bash
+# 第1步：登录BCS
+curl -X POST http://localhost:8000/api/bcs/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "your_username", "password": "your_password"}'
+
+# 或者直接设置token（从BCS插件中获取）
+curl -X POST http://localhost:8000/api/bcs/token \
+  -H "Content-Type: application/json" \
+  -d '{"token": "your_bcs_token"}'
+
+# 第2步：先用爬虫采集商品基础数据
 curl -X POST http://localhost:8000/api/tasks/start \
   -H "Content-Type: application/json" \
-  -d '{
-    "keywords": ["наушники", "смартфон"],
-    "max_products": 1000,
-    "fetch_details": false
-  }'
+  -d '{"keywords": ["наушники"], "max_products": 100, "fetch_details": true}'
+
+# 第3步：用BCS获取精确销量和重量数据
+curl -X POST http://localhost:8000/api/bcs/fetch-sales \
+  -H "Content-Type: application/json" \
+  -d '{"keyword": "наушники", "limit": 100, "include_weight": true}'
+
+# 查询单个商品的BCS数据（实时）
+curl http://localhost:8000/api/bcs/sales/1681720585
+
+# 查看BCS服务状态
+curl http://localhost:8000/api/bcs/status
 ```
 
-### 深度采集（含详情页，数据完整）
+### 方案二：库存追踪估算销量（无需BCS账号）
 
 ```bash
+# 第1步：采集商品
 curl -X POST http://localhost:8000/api/tasks/start \
   -H "Content-Type: application/json" \
-  -d '{
-    "keywords": ["наушники"],
-    "max_products": 100,
-    "fetch_details": true
-  }'
-```
+  -d '{"keywords": ["наушники"], "fetch_details": true}'
 
-> 开启 `fetch_details` 后，系统会在列表页采集完成后，逐个访问每个商品的详情页，获取完整的类目、尺寸、重量、跟卖等信息。速度约为每分钟10-15个商品。
-
-### 库存追踪与销量估算（v2.1 新增）
-
-```bash
-# 启动库存追踪（追踪已采集商品的库存变化）
+# 第2步：启动库存追踪（建议每4-6小时一次）
 curl -X POST http://localhost:8000/api/stock/track \
   -H "Content-Type: application/json" \
-  -d '{"keyword": "наушники", "limit": 50}'
+  -d '{"keyword": "наушники", "limit": 100}'
 
-# 查询有销量数据的商品（按月销量排序）
-curl "http://localhost:8000/api/stock/sales?sort_by=monthly_sales&sort_order=desc"
-
-# 查看单个商品的库存变化历史
-curl "http://localhost:8000/api/stock/snapshots/12345678?days=30"
+# 第3步：查询销量数据（需积累3天以上数据）
+curl http://localhost:8000/api/stock/sales?sort_by=monthly_sales
 ```
 
-### 使用步骤
+### 数据导出
 
-1. **添加关键词**：进入「关键词管理」，添加俄语搜索关键词
-2. **创建采集任务**：进入「采集任务」，选择关键词并配置参数
-3. **启动库存追踪**：采集完成后，启动库存追踪任务（建议每4-6小时一次）
-4. **查看数据**：进入「商品数据」页面查看采集结果和销量估算
-5. **导出数据**：点击「导出」按钮下载Excel/CSV/JSON文件
-6. **计算利润**：输入采购价，自动计算利润空间
+```bash
+curl -X POST http://localhost:8000/api/export \
+  -H "Content-Type: application/json" \
+  -d '{"keyword": "наушники", "format": "xlsx"}'
+```
 
-## API接口文档
+## API接口完整列表
 
-启动服务后访问 `http://localhost:8000/docs` 查看完整的Swagger API文档。
-
-### 主要接口
+### 基础采集接口
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/dashboard` | 获取仪表板数据 |
 | GET | `/api/keywords` | 获取关键词列表 |
 | POST | `/api/keywords` | 创建关键词 |
-| PUT | `/api/keywords/{id}` | 更新关键词 |
-| DELETE | `/api/keywords/{id}` | 删除关键词 |
 | POST | `/api/tasks/start` | 启动采集任务 |
 | POST | `/api/tasks/stop` | 停止采集任务 |
-| GET | `/api/tasks` | 获取任务列表 |
-| GET | `/api/tasks/status` | 获取实时采集状态 |
-| GET | `/api/products` | 获取商品列表（支持筛选、排序、分页） |
+| GET | `/api/products` | 获取商品列表 |
 | GET | `/api/products/{sku}` | 获取商品详情 |
-| POST | `/api/products/batch` | 批量接收外部推送的商品数据 |
-| POST | `/api/export` | 导出数据（xlsx/csv/json） |
+| POST | `/api/products/batch` | 批量接收外部数据 |
+| POST | `/api/export` | 导出数据 |
 | POST | `/api/profit/calculate` | 计算利润 |
-| GET | `/api/schedules` | 获取定时任务列表 |
-| POST | `/api/schedules` | 创建定时任务 |
-| DELETE | `/api/schedules/{id}` | 删除定时任务 |
 
-### 库存追踪与销量估算接口（v2.1 新增）
+### BCS数据服务接口（v3.0 新增）
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/api/stock/track` | 启动库存追踪任务 |
-| POST | `/api/stock/stop` | 停止库存追踪任务 |
-| GET | `/api/stock/status` | 获取库存追踪状态 |
-| GET | `/api/stock/snapshots/{sku}` | 获取商品库存快照历史 |
+| POST | `/api/bcs/login` | 登录BCS服务 |
+| POST | `/api/bcs/token` | 直接设置BCS token |
+| POST | `/api/bcs/fetch-sales` | 批量获取BCS销量和重量数据 |
+| GET | `/api/bcs/status` | 获取BCS服务状态 |
+| POST | `/api/bcs/stop` | 停止BCS数据获取 |
+| GET | `/api/bcs/sales/{sku}` | 实时查询单个商品BCS数据 |
+
+### 库存追踪接口
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/stock/track` | 启动库存追踪 |
+| POST | `/api/stock/stop` | 停止库存追踪 |
+| GET | `/api/stock/status` | 获取追踪状态 |
+| GET | `/api/stock/snapshots/{sku}` | 库存快照历史 |
 | POST | `/api/stock/estimate` | 手动触发销量估算 |
-| GET | `/api/stock/sales` | 查询有销量数据的商品 |
+| GET | `/api/stock/sales` | 查询销量数据 |
+
+## BCS逆向分析详解
+
+### 发现过程
+
+通过解压并逆向分析BCS Ozon Plus Chrome插件（v82.7.0），发现以下关键信息：
+
+1. **BCS后端API域名**：`ozon.bcserp.com/prod-api`
+2. **认证域名**：`www.bcserp.com/prod-api`
+3. **认证方式**：用户名密码登录获取token，请求头携带 `Authorization: {token}`
+4. **销量数据接口**：`/system/sku/skuss/new?sku={SKU}` 返回月销量、推广、GMV等
+5. **周销量接口**：同上接口加 `&period=weekly` 参数
+6. **重量尺寸接口**：`/system/ozonRecord/shops` POST请求，通过属性key获取
+
+### BCS API端点
+
+| 功能 | 方法 | URL |
+|------|------|-----|
+| 登录 | POST | `https://www.bcserp.com/prod-api/pluginLogin` |
+| 月销量 | GET | `https://ozon.bcserp.com/prod-api/system/sku/skuss/new?sku={SKU}` |
+| 周销量 | GET | `https://ozon.bcserp.com/prod-api/system/sku/skuss/new?sku={SKU}&period=weekly` |
+| 重量尺寸 | POST | `https://ozon.bcserp.com/prod-api/system/ozonRecord/shops` |
+| 用户信息 | GET | `https://ozon.bcserp.com/prod-api/getInfo` |
+
+### 重量尺寸属性Key映射
+
+| Key | 含义 | 单位 |
+|-----|------|------|
+| 9454 | 长度 | mm |
+| 9455 | 宽度 | mm |
+| 9456 | 高度 | mm |
+| 4497 | 重量 | g |
+
+### BCS返回字段映射
+
+| BCS字段 | 含义 | 系统字段 |
+|---------|------|---------|
+| monthsales | 月/周销量 | monthly_sales / weekly_sales |
+| daysWithTrafarets | 推广天数(28天) | paid_promo_days |
+| drr | 广告费用占比 | ad_cost_ratio |
+| gmvSum | 月销售额 | gmv_rub |
+| sources | 卖家类型 | seller_type |
+| createDate | 创建时间 | creation_date |
+| catname | 类目 | category |
+| brand | 品牌 | brand |
+| views | 展示量 | extra_data.bcs_data.total_views |
+| sessioncount | 点击量 | extra_data.bcs_data.click_count |
+| convViewToOrder | 转化率 | extra_data.bcs_data.view_to_order_rate |
 
 ## 技术实现原理
 
 ### composer-api 拦截方案
 
-本爬虫的核心技术是拦截OZON前端与后端之间的 `composer-api.bx/page/json/v2` 请求响应。这是OZON内部使用的API，返回页面所有组件（widget）的结构化JSON数据。
-
-```
-浏览器访问OZON页面
-       │
-       ▼
-OZON前端发起 composer-api 请求
-       │
-       ▼
-Playwright拦截响应 ──→ 提取 widgetStates JSON
-       │
-       ▼
-解析各widget数据 ──→ 商品信息、价格、特征、卖家等
-```
-
-**优势**：
-- 直接获取结构化JSON，无需解析DOM
-- 数据准确性高，不受页面样式变化影响
-- 可获取DOM中不可见的隐藏数据
-
-### 库存追踪与销量估算原理（v2.1 新增）
-
-```
-定时任务（每4-6小时）
-       │
-       ▼
-访问商品详情页 ──→ 提取库存数量
-       │              ├─ "Осталось X шт"（页面文本）
-       │              ├─ webAddToCart.maxQuantity（API数据）
-       │              └─ 加购测试法（最大可购数量）
-       │
-       ▼
-保存库存快照 ──→ stock_snapshots 表
-       │
-       ▼
-销量估算计算
-       ├─→ 库存差值法：Σ(前次库存 - 本次库存)，排除补货
-       ├─→ 评论增长法：评论增长数 / 评论转化率(2%)
-       └─→ 评论总量法：总评论数 / 2% / 上架天数 × 统计天数
-```
+通过Playwright拦截OZON前端的 `composer-api.bx/page/json/v2` 请求，直接获取结构化JSON数据。
 
 ### 详情页分页加载
 
-商品详情页的数据分两次加载：
+商品详情页数据分两次加载：
 - **第一次**：基本信息（标题、价格、图片、卖家）
 - **第二次**（`layout_page_index=2`）：完整特征（尺寸、重量、品牌等）
 
-爬虫通过滚动页面触发第二次加载，从而获取完整的商品特征数据。
+### 反爬策略
 
-## 反爬策略说明
+1. 浏览器指纹伪装（隐藏WebDriver标识）
+2. 随机User-Agent
+3. 请求延迟（1-4秒随机）
+4. 平滑滚动
+5. 代理IP支持
+6. 俄语环境（locale=ru-RU, timezone=Moscow）
 
-1. **浏览器指纹伪装**：隐藏WebDriver标识、修改navigator属性、注入Chrome对象
-2. **随机User-Agent**：每次启动随机选择UA，模拟不同浏览器
-3. **请求延迟**：每次操作间随机延迟1-4秒，模拟人类行为
-4. **平滑滚动**：分步滚动页面，避免瞬间跳转
-5. **代理IP支持**：可配置代理IP池，分散请求来源
-6. **俄语环境**：浏览器locale设置为ru-RU，时区设为莫斯科
+## 注意事项
 
-### 代理配置
+1. **BCS账号**：使用BCS数据服务需要有BCS平台的账号，可在 www.bcserp.com 注册
+2. **请求频率**：BCS API有频率限制，系统内置了0.5秒的请求间隔
+3. **代理IP**：大批量爬取OZON页面时建议使用俄罗斯住宅代理IP
+4. **数据时效**：BCS的销量数据通常有1-2天的延迟
+5. **合规使用**：请遵守OZON和BCS的使用条款
 
-建议使用俄罗斯地区的住宅代理：
+## 版本历史
 
-```python
-# 在 config.py 中配置
-PROXY_CONFIG = {
-    "enabled": True,
-    "proxy_list": [
-        {"server": "http://proxy-ru:8080", "username": "user", "password": "pass"},
-    ],
-}
-```
-
-## 生产环境部署建议
-
-1. **数据库**：将SQLite替换为MySQL 8.0，修改 `DATABASE_URL`
-2. **代理IP**：配置5-10个俄罗斯住宅代理IP，轮换使用
-3. **并发控制**：建议同时运行不超过3个采集任务
-4. **定时策略**：错峰采集，避开OZON高峰时段（莫斯科时间10:00-22:00）
-5. **库存追踪频率**：建议每4-6小时运行一次，太频繁容易触发反爬
-6. **数据备份**：配置MySQL自动备份
-7. **监控告警**：对接飞书/钉钉WebHook，采集失败时自动通知
-
-## 详细开发文档
-
-请查看 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) 获取完整的开发文档，包括：
-- 数据来源与字段的详细技术说明
-- composer-api 数据结构解析
-- 特征数据（尺寸/重量）的提取逻辑
-- 库存追踪与销量估算的技术细节
-- API接口完整文档
-- 常见问题解答
-
-## 技术栈
-
-| 组件 | 技术 | 说明 |
-|------|------|------|
-| 后端框架 | FastAPI | 高性能异步Web框架 |
-| 爬虫引擎 | Playwright | 无头浏览器自动化 |
-| 库存追踪 | Playwright + StockTracker | 库存监控与销量估算 |
-| 数据库 | SQLite/MySQL | 数据持久化（SQLAlchemy ORM） |
-| 任务调度 | APScheduler | 定时任务管理 |
-| 数据导出 | openpyxl | Excel/CSV/JSON导出 |
-| 前端 | 原生HTML/CSS/JS | 轻量级管理界面 |
-| 部署 | Docker | 容器化部署 |
+- **v3.0** (2026-02-08): 集成BCS数据服务，实现精确销量数据获取，19个目标字段全部完成
+- **v2.1** (2026-02-07): 新增库存追踪与销量估算功能
+- **v2.0** (2026-02-07): 重构爬虫引擎，使用Playwright + composer-api方案
+- **v1.0** (2026-02-06): 初始版本，基础爬虫功能
 
 ## 许可证
 
