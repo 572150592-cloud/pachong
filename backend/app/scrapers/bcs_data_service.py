@@ -1,50 +1,25 @@
 """
-BCS数据服务模块 v1.0
-====================
-通过逆向BCS Ozon Plus插件发现的API接口，获取商品销量、重量等数据。
+BCS数据服务模块 v2.0（伪装加固版）
+===================================
+通过模拟BCS Ozon Plus Chrome插件的真实请求行为，获取商品销量、重量等数据。
 
-BCS (www.bcserp.com) 是一个第三方OZON数据分析平台，其Chrome插件通过
-自有后端API提供销量、推广、尺寸重量等OZON前端不直接展示的数据。
+伪装策略：
+1. 完全模拟Chrome插件的请求特征（Headers、Origin、Referer）
+2. 模拟插件的认证流程（pluginLogin → inspectCookie → 数据请求）
+3. 模拟插件的请求频率（10s/1min计数器，自然间隔）
+4. 请求通过浏览器上下文发起（使用已登录的OZON页面作为Origin）
+5. 随机化请求间隔，模拟真实用户浏览行为
 
-API端点（通过逆向分析获得）：
-- 登录: POST https://www.bcserp.com/prod-api/pluginLogin
-- 销量数据(月): GET https://ozon.bcserp.com/prod-api/system/sku/skuss/new?sku=<SKU>
-- 销量数据(周): GET https://ozon.bcserp.com/prod-api/system/sku/skuss/new?sku=<SKU>&period=weekly
-- 重量尺寸: POST https://ozon.bcserp.com/prod-api/system/ozonRecord/shops
-- 用户信息: GET https://ozon.bcserp.com/prod-api/getInfo
-
-返回字段说明：
-- monthsales: 月销量
-- daysInPromo: 促销活动参与天数(28天内)
-- daysWithTrafarets: 付费推广参与天数(28天内)
-- gmvSum: 月销售额(GMV)
-- drr: 广告费用占比(DRR%)
-- salesDynamics: 周转动态
-- nullableRedemptionRate: 成交率
-- views: 商品展示总量
-- convViewToOrder: 展示转化率
-- sessioncount: 商品点击量
-- convTocartPdp: 购物车转化率
-- discount: 促销活动折扣
-- promoRevenueShare: 促销活动转化率
-- volume: 体积/公升
-- avgprice: 平均价格
-- sources: 卖家类型
-- sessionCountSearch: 搜索中的浏览量
-- createDate: 商品创建时间
-- article: 货号
-- brand: 品牌
-- catname: 类目名称
-
-重量尺寸数据key:
-- 9454: 长度(mm)
-- 9455: 宽度(mm)
-- 9456: 高度(mm)
-- 4497: 重量(g)
+风险评估：
+- BCS服务端能看到的信息：IP地址、请求Headers、请求频率、token
+- BCS服务端无法看到的信息：User-Agent是否来自真实Chrome扩展
+- 关键伪装点：Origin必须是ozon.ru页面、请求频率不能过快、
+  必须先调inspectCookie、token使用方式与插件一致
 """
 
 import asyncio
 import logging
+import random
 import time
 from typing import Dict, List, Optional, Any
 
@@ -55,66 +30,150 @@ logger = logging.getLogger(__name__)
 
 class BCSDataService:
     """
-    BCS数据服务 - 通过BCS后端API获取OZON商品的销量、推广、尺寸重量等数据。
+    BCS数据服务 v2.0 - 完全模拟Chrome插件行为的伪装版本。
 
-    使用方式:
-        service = BCSDataService()
-        await service.login("username", "password")
-        sales_data = await service.get_sales_data("1681720585")
-        weight_data = await service.get_weight_data("1681720585")
+    核心伪装措施：
+    1. Headers完全复刻插件的jQuery.ajax默认行为
+    2. 登录后自动调用inspectCookie（与插件行为一致）
+    3. 请求间隔随机化（1.5~3.5秒），模拟用户浏览商品的自然节奏
+    4. 批量请求时模拟10s/1min的请求计数器行为
+    5. Origin和Referer设置为ozon.ru（插件从OZON页面发起请求）
     """
 
-    # BCS后端API基础URL
+    # BCS后端API基础URL（与插件完全一致）
     BASE_URL = "https://ozon.bcserp.com/prod-api"
     AUTH_URL = "https://www.bcserp.com/prod-api"
 
-    # 请求间隔（秒），避免触发BCS的频率限制
-    REQUEST_INTERVAL = 0.5
-
-    # 重量尺寸数据的属性key映射
+    # 重量尺寸数据的属性key映射（逆向确认）
     DIMENSION_KEYS = {
-        "9454": "length_mm",
-        "9455": "width_mm",
-        "9456": "height_mm",
-        "4497": "weight_g",
+        "9454": "length_mm",   # 长度
+        "9455": "width_mm",    # 宽度
+        "9456": "height_mm",   # 高度
+        "4497": "weight_g",    # 重量
     }
+
+    # 请求频率控制参数（模拟插件的自然行为）
+    MIN_INTERVAL = 1.5    # 最小请求间隔（秒）
+    MAX_INTERVAL = 3.5    # 最大请求间隔（秒）
+    BATCH_PAUSE_MIN = 5   # 批量请求中每10个SKU后的暂停（秒）
+    BATCH_PAUSE_MAX = 12  # 批量请求中每10个SKU后的暂停（秒）
 
     def __init__(self, token: Optional[str] = None):
         self.token = token
         self._session: Optional[aiohttp.ClientSession] = None
         self._last_request_time = 0
+        self._request_count_10s = 0
+        self._request_count_1min = 0
+        self._10s_start = time.time()
+        self._1min_start = time.time()
+
+    def _build_browser_headers(self) -> Dict[str, str]:
+        """
+        构建模拟Chrome浏览器+插件环境的请求头。
+        
+        BCS插件是作为Chrome Content Script运行在ozon.ru页面上的，
+        它通过jQuery.ajax发起跨域请求到bcserp.com。
+        
+        Chrome会自动为跨域XHR添加以下Headers：
+        - Origin: 发起请求的页面域名
+        - Referer: 当前页面URL
+        - sec-ch-ua: Chrome版本信息
+        - sec-fetch-*: 请求上下文信息
+        
+        jQuery.ajax默认会添加：
+        - X-Requested-With: XMLHttpRequest
+        - Content-Type: application/json (对于POST请求)
+        """
+        return {
+            # Chrome浏览器标识（与插件运行环境一致）
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/131.0.0.0 Safari/537.36"
+            ),
+            # 跨域请求的来源（插件从ozon.ru页面发起）
+            "Origin": "https://www.ozon.ru",
+            "Referer": "https://www.ozon.ru/",
+            # jQuery.ajax默认添加的标识
+            "X-Requested-With": "XMLHttpRequest",
+            # Chrome的安全标识（sec-ch-ua）
+            "sec-ch-ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Windows"',
+            # Chrome的Fetch Metadata（跨域XHR的标准值）
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "cross-site",
+            # 标准HTTP头
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,ru;q=0.7",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+        }
 
     async def _ensure_session(self):
-        """确保HTTP会话已创建"""
+        """创建模拟Chrome插件环境的HTTP会话"""
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(
-                headers={
-                    "Content-Type": "application/json; charset=utf-8",
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                                  "AppleWebKit/537.36 (KHTML, like Gecko) "
-                                  "Chrome/131.0.0.0 Safari/537.36",
-                }
+                headers=self._build_browser_headers(),
+                # 模拟Chrome的cookie处理
+                cookie_jar=aiohttp.CookieJar(unsafe=True),
             )
 
-    async def _rate_limit(self):
-        """简单的请求频率限制"""
+    async def _smart_delay(self):
+        """
+        智能请求延迟 - 模拟真实用户浏览商品时的自然节奏。
+        
+        BCS插件的实际行为：
+        - 用户在OZON页面浏览商品时，每查看一个商品会触发一次API请求
+        - 正常浏览速度约2~5秒看一个商品
+        - 插件内部有10s和1min的请求计数器（仅用于日志，无限流）
+        
+        我们的策略：
+        - 基础间隔1.5~3.5秒（模拟正常浏览速度）
+        - 每10个请求后额外暂停5~12秒（模拟翻页或思考）
+        - 每50个请求后暂停15~30秒（模拟休息或切换类目）
+        """
         now = time.time()
         elapsed = now - self._last_request_time
-        if elapsed < self.REQUEST_INTERVAL:
-            await asyncio.sleep(self.REQUEST_INTERVAL - elapsed)
+        
+        # 基础随机间隔
+        delay = random.uniform(self.MIN_INTERVAL, self.MAX_INTERVAL)
+        
+        if elapsed < delay:
+            await asyncio.sleep(delay - elapsed)
+        
         self._last_request_time = time.time()
+        
+        # 更新请求计数器（模拟插件行为）
+        self._request_count_10s += 1
+        self._request_count_1min += 1
+        
+        # 重置10s计数器
+        if time.time() - self._10s_start >= 10:
+            self._request_count_10s = 0
+            self._10s_start = time.time()
+        
+        # 重置1min计数器
+        if time.time() - self._1min_start >= 60:
+            self._request_count_1min = 0
+            self._1min_start = time.time()
 
     async def close(self):
         """关闭HTTP会话"""
         if self._session and not self._session.closed:
             await self._session.close()
 
-    # ==================== 认证 ====================
+    # ==================== 认证（完全模拟插件流程） ====================
 
     async def login(self, username: str, password: str) -> bool:
         """
         登录BCS获取认证token。
-
+        
+        完全模拟插件的登录流程：
+        1. POST /pluginLogin 获取token
+        2. 登录成功后自动调用 GET /system/ozonShop/inspectCookie（与插件一致）
+        
         Args:
             username: BCS账号用户名
             password: BCS账号密码
@@ -123,32 +182,72 @@ class BCSDataService:
             登录是否成功
         """
         await self._ensure_session()
+        
         try:
+            # Step 1: 登录获取token（与插件完全一致）
+            login_headers = {
+                "Content-Type": "application/json",
+            }
+            
             async with self._session.post(
                 f"{self.AUTH_URL}/pluginLogin",
                 json={"username": username, "password": password},
+                headers=login_headers,
             ) as resp:
                 data = await resp.json()
                 if data.get("token"):
                     self.token = data["token"]
-                    logger.info("BCS登录成功")
+                    logger.info("BCS登录成功，token已获取")
+                    
+                    # Step 2: 登录后立即调用inspectCookie（模拟插件行为）
+                    # 插件在登录成功后会立即调用这个接口
+                    await self._inspect_cookie()
+                    
                     return True
                 else:
                     msg = data.get("msg", "登录失败")
                     logger.error(f"BCS登录失败: {msg}")
                     return False
+                    
         except Exception as e:
             logger.error(f"BCS登录请求出错: {e}")
             return False
+
+    async def _inspect_cookie(self):
+        """
+        模拟插件登录后的inspectCookie调用。
+        
+        BCS插件在登录成功后会立即调用此接口，
+        可能用于服务端记录登录状态或验证cookie。
+        不调用此接口可能导致后续请求被标记为异常。
+        """
+        try:
+            await asyncio.sleep(random.uniform(0.3, 0.8))  # 模拟自然延迟
+            async with self._session.get(
+                f"{self.BASE_URL}/system/ozonShop/inspectCookie",
+                headers=self._get_auth_headers(),
+            ) as resp:
+                # 不关心返回值，只需要调用
+                await resp.read()
+                logger.debug("inspectCookie调用完成")
+        except Exception as e:
+            logger.debug(f"inspectCookie调用失败（不影响功能）: {e}")
 
     def set_token(self, token: str):
         """直接设置认证token（如果已有token可跳过login）"""
         self.token = token
 
-    def _get_headers(self) -> Dict:
-        """获取带认证的请求头"""
+    def _get_auth_headers(self) -> Dict[str, str]:
+        """
+        获取带认证的请求头。
+        
+        BCS插件的认证方式：
+        - 直接在Authorization头中放置token值（不带Bearer前缀）
+        - 这与标准的Bearer token不同，是BCS的自定义实现
+        """
         headers = {}
         if self.token:
+            # 插件直接使用 Authorization: <token>，不带Bearer前缀
             headers["Authorization"] = self.token
         return headers
 
@@ -157,6 +256,11 @@ class BCSDataService:
     async def get_sales_data(self, sku: str, period: Optional[str] = None) -> Optional[Dict]:
         """
         获取商品销量数据。
+        
+        模拟插件的getSkuData函数行为：
+        - GET /system/sku/skuss/new?sku=<SKU>
+        - 可选参数 &period=weekly 获取周数据
+        - 请求头只有 Authorization
 
         Args:
             sku: 商品SKU
@@ -164,54 +268,37 @@ class BCSDataService:
 
         Returns:
             包含销量等数据的字典，失败返回None
-
-        返回数据示例:
-            {
-                "monthsales": "1234",
-                "article": "ARTXXX",
-                "brand": "Apple",
-                "catname": "Смартфоны",
-                "daysInPromo": 15,
-                "daysWithTrafarets": 8,
-                "gmvSum": 5678900,
-                "drr": 12.5,
-                "salesDynamics": "↑",
-                "nullableRedemptionRate": 3.2,
-                "views": 45000,
-                "convViewToOrder": 2.1,
-                "sessioncount": 12000,
-                "convTocartPdp": 8.5,
-                "discount": 15,
-                "promoRevenueShare": 25,
-                "volume": "0.5",
-                "avgprice": 45000,
-                "sources": "FBO",
-                "sessionCountSearch": 8000,
-                "createDate": "2024-01-15"
-            }
         """
         if not self.token:
             logger.warning("BCS未登录，无法获取销量数据")
             return None
 
         await self._ensure_session()
-        await self._rate_limit()
+        await self._smart_delay()
 
         url = f"{self.BASE_URL}/system/sku/skuss/new?sku={sku}"
         if period:
             url += f"&period={period}"
 
         try:
-            async with self._session.get(url, headers=self._get_headers()) as resp:
+            async with self._session.get(
+                url, 
+                headers=self._get_auth_headers(),
+            ) as resp:
                 data = await resp.json()
 
-                if data.get("code") == 401:
-                    logger.error("BCS token已过期，请重新登录")
+                code = data.get("code")
+                if code == 401:
+                    logger.error("BCS token已过期(401)，请重新登录")
+                    self.token = None
                     return None
-                elif data.get("code") == 200:
+                elif code == 403:
+                    logger.error("BCS访问被拒绝(403)，账号可能被限制")
+                    return None
+                elif code == 200:
                     return data.get("data")
                 else:
-                    logger.debug(f"BCS销量数据请求返回: code={data.get('code')}, msg={data.get('msg')}")
+                    logger.debug(f"BCS返回: code={code}, msg={data.get('msg')}")
                     return data.get("data")
 
         except Exception as e:
@@ -219,30 +306,14 @@ class BCSDataService:
             return None
 
     async def get_weekly_sales(self, sku: str) -> Optional[str]:
-        """
-        获取商品周销量。
-
-        Args:
-            sku: 商品SKU
-
-        Returns:
-            周销量字符串，失败返回None
-        """
+        """获取商品周销量"""
         data = await self.get_sales_data(sku, period="weekly")
         if data and data.get("monthsales"):
             return data["monthsales"]
         return None
 
     async def get_monthly_sales(self, sku: str) -> Optional[str]:
-        """
-        获取商品月销量。
-
-        Args:
-            sku: 商品SKU
-
-        Returns:
-            月销量字符串，失败返回None
-        """
+        """获取商品月销量"""
         data = await self.get_sales_data(sku)
         if data and data.get("monthsales"):
             return data["monthsales"]
@@ -251,12 +322,9 @@ class BCSDataService:
     async def get_full_sales_info(self, sku: str) -> Dict:
         """
         获取商品的完整销量和运营数据（月度+周度）。
-
-        Args:
-            sku: 商品SKU
-
-        Returns:
-            包含月销量、周销量、推广数据等的完整字典
+        
+        模拟插件的processSalesData行为：
+        先获取月度数据，如果有数据再获取周度数据。
         """
         result = {
             "sku": sku,
@@ -310,7 +378,7 @@ class BCSDataService:
             result["search_views"] = int(monthly_data.get("sessionCountSearch", 0) or 0)
             result["creation_date"] = str(monthly_data.get("createDate", ""))
 
-            # 如果有月销量数据，再获取周销量
+            # 如果有月销量数据，再获取周销量（与插件行为一致）
             if monthly_data.get("monthsales"):
                 weekly_data = await self.get_sales_data(sku, period="weekly")
                 if weekly_data and weekly_data.get("monthsales"):
@@ -323,33 +391,29 @@ class BCSDataService:
     async def get_weight_data(self, sku: str) -> Optional[Dict]:
         """
         获取商品的重量和尺寸数据。
-
-        Args:
-            sku: 商品SKU
-
-        Returns:
-            包含长度、宽度、高度、重量的字典
-
-        返回数据示例:
-            {
-                "length_mm": 160,
-                "width_mm": 78,
-                "height_mm": 8,
-                "weight_g": 171
-            }
+        
+        模拟插件的getSkuPackaging函数：
+        - POST /system/ozonRecord/shops
+        - Body: {"sku": "<SKU>"}
+        - Content-Type: application/json; charset=utf-8
+        - 超时8秒（与插件一致）
         """
         if not self.token:
             logger.warning("BCS未登录，无法获取重量数据")
             return None
 
         await self._ensure_session()
-        await self._rate_limit()
+        await self._smart_delay()
 
         try:
+            post_headers = self._get_auth_headers()
+            post_headers["Content-Type"] = "application/json; charset=utf-8"
+            
             async with self._session.post(
                 f"{self.BASE_URL}/system/ozonRecord/shops",
                 json={"sku": sku},
-                headers=self._get_headers(),
+                headers=post_headers,
+                timeout=aiohttp.ClientTimeout(total=8),  # 与插件超时一致
             ) as resp:
                 data = await resp.json()
 
@@ -372,12 +436,14 @@ class BCSDataService:
                                 result[field_name] = 0
                     return result
 
+        except asyncio.TimeoutError:
+            logger.debug(f"SKU {sku} 重量数据请求超时（8s）")
         except Exception as e:
             logger.error(f"获取SKU {sku} 重量数据出错: {e}")
 
         return None
 
-    # ==================== 批量获取 ====================
+    # ==================== 批量获取（模拟自然浏览行为） ====================
 
     async def batch_get_sales_data(
         self,
@@ -387,14 +453,11 @@ class BCSDataService:
     ) -> List[Dict]:
         """
         批量获取商品销量数据。
-
-        Args:
-            sku_list: SKU列表
-            include_weekly: 是否同时获取周销量
-            on_progress: 进度回调函数
-
-        Returns:
-            销量数据列表
+        
+        模拟用户在OZON页面逐个浏览商品的行为：
+        - 每个SKU之间有随机间隔（1.5~3.5秒）
+        - 每10个SKU后有较长暂停（5~12秒，模拟翻页）
+        - 每50个SKU后有更长暂停（15~30秒，模拟休息）
         """
         results = []
         total = len(sku_list)
@@ -422,6 +485,18 @@ class BCSDataService:
                     "status": "running",
                 })
 
+            # 模拟自然浏览节奏
+            if i > 0 and (i + 1) % 50 == 0:
+                # 每50个SKU暂停较长时间（模拟休息/切换类目）
+                pause = random.uniform(15, 30)
+                logger.info(f"批量请求暂停 {pause:.1f}s（已处理{i+1}个）")
+                await asyncio.sleep(pause)
+            elif i > 0 and (i + 1) % 10 == 0:
+                # 每10个SKU暂停（模拟翻页）
+                pause = random.uniform(self.BATCH_PAUSE_MIN, self.BATCH_PAUSE_MAX)
+                logger.info(f"翻页暂停 {pause:.1f}s（已处理{i+1}个）")
+                await asyncio.sleep(pause)
+
         logger.info(f"批量销量数据获取完成: {len(results)}/{total}")
         return results
 
@@ -430,16 +505,7 @@ class BCSDataService:
         sku_list: List[str],
         on_progress: Optional[callable] = None,
     ) -> List[Dict]:
-        """
-        批量获取商品重量尺寸数据。
-
-        Args:
-            sku_list: SKU列表
-            on_progress: 进度回调函数
-
-        Returns:
-            重量尺寸数据列表
-        """
+        """批量获取商品重量尺寸数据"""
         results = []
         total = len(sku_list)
 
@@ -468,6 +534,11 @@ class BCSDataService:
                     "status": "running",
                 })
 
+            # 模拟自然浏览节奏
+            if i > 0 and (i + 1) % 10 == 0:
+                pause = random.uniform(self.BATCH_PAUSE_MIN, self.BATCH_PAUSE_MAX)
+                await asyncio.sleep(pause)
+
         logger.info(f"批量重量数据获取完成: {len(results)}/{total}")
         return results
 
@@ -478,13 +549,9 @@ class BCSDataService:
     ) -> List[Dict]:
         """
         批量获取商品的完整数据（销量 + 重量尺寸）。
-
-        Args:
-            sku_list: SKU列表
-            on_progress: 进度回调函数
-
-        Returns:
-            完整数据列表，每个元素包含销量和重量尺寸数据
+        
+        注意：每个SKU会发起2~3个请求（月销量+周销量+重量），
+        所以实际请求量是SKU数量的2~3倍。
         """
         results = []
         total = len(sku_list)
@@ -492,10 +559,11 @@ class BCSDataService:
         for i, sku in enumerate(sku_list):
             logger.info(f"获取完整数据 [{i+1}/{total}]: SKU={sku}")
 
-            # 并发获取销量和重量数据
-            sales_task = self.get_full_sales_info(sku)
-            weight_task = self.get_weight_data(sku)
-            sales_data, weight_data = await asyncio.gather(sales_task, weight_task)
+            # 先获取销量数据
+            sales_data = await self.get_full_sales_info(sku)
+            
+            # 再获取重量数据（模拟插件的顺序调用）
+            weight_data = await self.get_weight_data(sku)
 
             # 合并数据
             combined = sales_data.copy() if sales_data else {"sku": sku}
@@ -514,6 +582,16 @@ class BCSDataService:
                     "sku": sku,
                     "status": "running",
                 })
+
+            # 模拟自然浏览节奏
+            if i > 0 and (i + 1) % 50 == 0:
+                pause = random.uniform(15, 30)
+                logger.info(f"批量请求暂停 {pause:.1f}s（已处理{i+1}个）")
+                await asyncio.sleep(pause)
+            elif i > 0 and (i + 1) % 10 == 0:
+                pause = random.uniform(self.BATCH_PAUSE_MIN, self.BATCH_PAUSE_MAX)
+                logger.info(f"翻页暂停 {pause:.1f}s（已处理{i+1}个）")
+                await asyncio.sleep(pause)
 
         logger.info(f"批量完整数据获取完成: {len(results)}/{total}")
         return results

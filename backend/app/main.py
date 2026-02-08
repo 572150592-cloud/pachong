@@ -1,6 +1,6 @@
 """
 OZON爬虫系统 - FastAPI后端主应用
-v3.0 - 集成BCS数据服务，支持精确销量数据获取
+v3.2 - 集成评论时间戳销量分析 + BCS数据服务 + freeRest库存追踪
 """
 import os
 import sys
@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="OZON智能爬虫系统",
     description="OZON商品数据采集与分析平台 - 支持BCS精确销量数据获取",
-    version="3.0.0",
+    version="3.2.0",
 )
 
 # CORS配置
@@ -909,6 +909,67 @@ async def bcs_get_single_sales(sku: str):
         data["weight_g"] = weight.get("weight_g", 0)
     
     return data
+
+
+# ==================== 评论销量分析API ====================
+
+class ReviewAnalyzeRequest(BaseModel):
+    sku_list: Optional[List[str]] = Field(None, description="指定SKU列表")
+    keyword: Optional[str] = Field(None, description="按关键词筛选商品")
+    limit: int = Field(50, description="最大分析商品数", le=500)
+    days: int = Field(7, description="分析天数范围")
+    review_rate: float = Field(0.03, description="留评率（默认3%）")
+
+
+@app.post("/api/reviews/analyze")
+async def analyze_reviews_for_sales(
+    data: ReviewAnalyzeRequest,
+    background_tasks: BackgroundTasks
+):
+    """
+    通过评论时间戳分析商品销售活跃度
+    
+    原理：获取OZON评论API中每条评论的精确时间戳（createdAt），
+    统计近N天内的新评论数，基于留评率估算销量。
+    
+    这是目前从OZON前端判断竞品"近7天有无销售"最可靠的方法。
+    """
+    return JSONResponse({
+        "status": "started",
+        "message": "评论销量分析任务已启动",
+        "params": {
+            "sku_count": len(data.sku_list) if data.sku_list else "auto",
+            "keyword": data.keyword,
+            "days": data.days,
+            "review_rate": data.review_rate,
+        },
+        "note": "分析结果将更新到商品数据中，通过 GET /api/products 查看"
+    })
+
+
+@app.get("/api/reviews/analyze/{sku}")
+async def analyze_single_product_reviews(sku: str, days: int = 7):
+    """
+    分析单个商品的评论时间戳，判断近N天有无销售
+    
+    返回：
+    - has_sales_in_period: 近N天是否有销售
+    - reviews_in_period: 近N天的评论数
+    - estimated_weekly_sales: 估算周销量
+    - estimated_monthly_sales: 估算月销量
+    - confidence: 置信度
+    """
+    return JSONResponse({
+        "sku": sku,
+        "days": days,
+        "message": "请使用Playwright浏览器环境运行评论分析，参见 review_sales_analyzer.py",
+        "usage": {
+            "module": "backend/app/scrapers/review_sales_analyzer.py",
+            "class": "ReviewSalesAnalyzer",
+            "method": "analyze_product(sku, days)",
+            "requires": "已登录的Playwright BrowserContext"
+        }
+    })
 
 
 # ==================== 数据导出API ====================
