@@ -494,6 +494,41 @@ class OzonScraper:
                     if re.search(r'\d+.*(?:заказ|покуп|куплен|продан|раз)', t, re.I):
                         orders_text = t
 
+            # === 增强：从搜索结果中提取库存数量 (maxItems) ===
+            stock_quantity = None
+            ozon_button = multi_button.get("ozonButton", {})
+            add_to_cart = ozon_button.get("addToCart", {})
+            if add_to_cart:
+                qty_button = add_to_cart.get("quantityButton", {})
+                max_items = qty_button.get("maxItems")
+                if max_items:
+                    stock_quantity = int(max_items)
+            
+            # 也尝试从其他位置获取
+            if stock_quantity is None:
+                item_str = json.dumps(item)
+                max_items_match = re.search(r'"maxItems"\s*:\s*(\d+)', item_str)
+                if max_items_match:
+                    stock_quantity = int(max_items_match.group(1))
+
+            # === 增强：从搜索结果中提取评分和评论数 ===
+            # OZON搜索结果中的labelList包含评分和评论数
+            for state in main_state:
+                atom_data = state.get("atom", {})
+                label_list = atom_data.get("labelList", {})
+                if label_list:
+                    label_items = label_list.get("items", [])
+                    for li in label_items:
+                        li_title = li.get("title", "")
+                        # 评分："5.0  "
+                        if not rating and re.match(r'^\d+[.,]\d+\s*$', li_title.strip()):
+                            rating = float(li_title.strip().replace(',', '.'))
+                        # 评论数："2 703 отзыва"
+                        if not review_count:
+                            rv_match = re.search(r'([\d\s]+)\s*отзыв', li_title)
+                            if rv_match:
+                                review_count = int(rv_match.group(1).replace(' ', ''))
+
             return {
                 "sku": sku,
                 "title": title[:500],
@@ -509,6 +544,7 @@ class OzonScraper:
                 "seller_type": seller_type,
                 "is_promoted": is_promoted,
                 "orders_text": orders_text,
+                "stock_quantity": stock_quantity,
                 "keyword": keyword,
                 "scraped_at": datetime.now().isoformat(),
                 "data_source": "composer-api",
@@ -849,28 +885,75 @@ class OzonScraper:
                             if cat_id_match:
                                 detail["category_id"] = cat_id_match.group(1)
 
-                # 解析卖家信息
+                # 解析卖家信息（增强版：提取trustFactors中的卖家订单数和详细信息）
                 elif "webCurrentSeller" in key:
+                    # 提取卖家名称
                     detail["seller_name"] = value.get("name", "") or value.get("sellerName", "")
                     detail["seller_id"] = str(value.get("sellerId", "") or value.get("id", ""))
+                    
+                    # 从seller cell中提取卖家名称（备用）
+                    if not detail["seller_name"]:
+                        seller_cell = value.get("sellerCell", {})
+                        left_block = seller_cell.get("leftBlock", {})
+                        common = left_block.get("common", {})
+                        title = common.get("title", {})
+                        detail["seller_name"] = title.get("text", "")
+                    
+                    # 从sellerId提取（备用）
+                    if not detail["seller_id"]:
+                        value_str_tmp = json.dumps(value)
+                        sid_match = re.search(r'"sellerId"\s*:\s*"?(\d+)"?', value_str_tmp)
+                        if sid_match:
+                            detail["seller_id"] = sid_match.group(1)
+                    
                     # 判断卖家类型
                     is_ozon = value.get("isOzon", False) or "Ozon" in detail["seller_name"]
                     if is_ozon:
                         detail["seller_type"] = "Ozon (自营)"
                     else:
-                        # 检查FBO/FBS
                         delivery_schema = value.get("deliverySchema", "")
                         if delivery_schema:
                             detail["seller_type"] = delivery_schema
                         else:
                             detail["seller_type"] = "第三方卖家"
+                    
+                    # === 从trust factors中提取卖家订单数 ===
+                    # OZON的trustFactors结构：
+                    # [{"title": {"text": "Заказы"}, "badge": {"text": "259 K"}, ...}, ...]
+                    trust_factors = value.get("trustFactors", [])
+                    for tf in trust_factors:
+                        tf_title = tf.get("title", {}).get("text", "")
+                        tf_badge = tf.get("badge", {}).get("text", "")
+                        
+                        # 提取卖家总订单数
+                        if "Заказ" in tf_title and tf_badge:
+                            detail["extra_data"]["seller_total_orders"] = tf_badge
+                        
+                        # 提取卖家评分
+                        if "Рейтинг" in tf_title and tf_badge:
+                            detail["extra_data"]["seller_rating"] = tf_badge
+                        
+                        # 提取配送信息
+                        if "Достав" in tf_title and tf_badge:
+                            detail["extra_data"]["seller_delivery"] = tf_badge
+                        
+                        # 提取卖家注册日期
+                        if "Дат" in tf_title and tf_badge:
+                            detail["extra_data"]["seller_reg_date"] = tf_badge
+                    
+                    # 检查FBO/FBS标记（从seller icon中提取）
+                    value_str_check = json.dumps(value)
+                    if '"sellerIcon"' in value_str_check:
+                        if 'premium' in value_str_check.lower() or 'ozon_premium' in value_str_check.lower():
+                            detail["seller_type"] = "FBO (Фулфилмент Ozon)"
+                        elif 'fbs' in value_str_check.lower():
+                            detail["seller_type"] = "FBS (Со склада продавца)"
 
-                # 解析跟卖信息
+                # 解析跟卖信息（增强版）
                 elif "cellList" in key or "bigPromoPDP" in key:
                     items = value.get("items", [])
                     if items and len(items) > 1:
-                        detail["followers_count"] = len(items) - 1  # 减去当前卖家
-                        # 找最低价
+                        detail["followers_count"] = len(items) - 1
                         min_price = float('inf')
                         min_url = ""
                         for offer_item in items[1:]:
@@ -883,21 +966,80 @@ class OzonScraper:
                             detail["follower_min_price"] = min_price
                             if min_url:
                                 detail["follower_min_url"] = f"https://www.ozon.ru{min_url}" if not min_url.startswith("http") else min_url
+                
+                # 解析webBestSeller（“有更便宜或更快”跟卖提示）
+                elif "webBestSeller" in key:
+                    # webBestSeller结构：{"textRs": [...], "count": "50", "modalLink": "/modal/otherOffersFromSellers?product_id=xxx"}
+                    count_str = value.get("count", "")
+                    if count_str:
+                        try:
+                            follower_count = int(count_str)
+                            if follower_count > detail.get("followers_count", 0):
+                                detail["followers_count"] = follower_count
+                        except (ValueError, TypeError):
+                            pass
+                    # 提取最低价格
+                    text_rs = value.get("textRs", [])
+                    for tr in text_rs:
+                        content = tr.get("content", "")
+                        if "₽" in content or "\u20bd" in content:
+                            best_price = self._parse_price(content)
+                            if best_price > 0:
+                                detail["follower_min_price"] = best_price
 
                 # 解析评分和评论
                 elif "webReviewProductScore" in key:
                     detail["rating"] = float(value.get("score", 0) or value.get("rating", 0) or 0)
                     detail["review_count"] = int(value.get("count", 0) or value.get("totalCount", 0) or 0)
 
-                # 解析加购按钮中的库存限制
+                # 解析加购按钮中的库存限制（freeRest字段）
                 elif "addToCart" in key.lower() or "webAddToCart" in key:
-                    max_qty = value.get("maxQuantity") or value.get("limit") or value.get("maxCount")
-                    if max_qty:
-                        detail["stock_quantity"] = int(max_qty)
+                    # === 关键发现：freeRest字段包含精确库存数量 ===
+                    # OZON的webAddToCart widget结构：
+                    # {"firstButton": {"toCart": {...}, "additionalButton": {
+                    #     "incrementButton": {...}, "sku": "12345", "freeRest": 152,
+                    #     "minAddToCartQuantity": 1, "inCartQuantity": 0
+                    # }}, ...}
+                    
+                    # 方法1：直接从顶层获取freeRest
+                    free_rest = value.get("freeRest")
+                    if free_rest is not None:
+                        detail["stock_quantity"] = int(free_rest)
+                    
+                    # 方法2：从嵌套结构中获取freeRest
+                    if detail["stock_quantity"] is None or detail["stock_quantity"] == 0:
+                        first_btn = value.get("firstButton", {})
+                        add_btn = first_btn.get("additionalButton", {})
+                        nested_rest = add_btn.get("freeRest")
+                        if nested_rest is not None:
+                            detail["stock_quantity"] = int(nested_rest)
+                    
+                    # 方法3：深度搜索整个widget JSON中的freeRest
+                    if detail["stock_quantity"] is None or detail["stock_quantity"] == 0:
+                        value_str_search = json.dumps(value)
+                        rest_match = re.search(r'"freeRest"\s*:\s*(\d+)', value_str_search)
+                        if rest_match:
+                            detail["stock_quantity"] = int(rest_match.group(1))
+                    
+                    # 方法4：从quantityButton.maxItems获取
+                    if detail["stock_quantity"] is None or detail["stock_quantity"] == 0:
+                        qty_btn = value.get("quantityButton", {})
+                        max_items = qty_btn.get("maxItems")
+                        if max_items:
+                            detail["stock_quantity"] = int(max_items)
+                    
+                    # 旧方法兜底
+                    if detail["stock_quantity"] is None or detail["stock_quantity"] == 0:
+                        max_qty = value.get("maxQuantity") or value.get("limit") or value.get("maxCount")
+                        if max_qty:
+                            detail["stock_quantity"] = int(max_qty)
+                    
                     # 检查是否缺货
                     if value.get("isOutOfStock") or value.get("outOfStock"):
                         detail["stock_quantity"] = 0
                         detail["stock_status"] = "out_of_stock"
+                    elif detail["stock_quantity"] is not None and detail["stock_quantity"] > 0:
+                        detail["stock_status"] = "in_stock"
 
                 # 解析推广/广告标记
                 elif "webStickyProducts" in key or "webPromo" in key:
@@ -1059,7 +1201,7 @@ class OzonScraper:
         return None
 
     async def _extract_detail_from_dom(self, page: Page, sku: str) -> Dict:
-        """从商品详情页DOM中提取数据（作为API数据的补充）"""
+        """从商品详情页DOM中提取数据（增强版：含尺寸重量、库存、跟卖数据）"""
         try:
             return await page.evaluate("""
                 (sku) => {
@@ -1102,6 +1244,64 @@ class OzonScraper:
                         const priceMatch = priceText.match(/([\\d\\s]+)/);
                         if (priceMatch) {
                             data.price = parseFloat(priceMatch[1].replace(/\\s/g, ''));
+                        }
+                    }
+
+                    // === 增强：从webCharacteristics中提取尺寸和重量 ===
+                    const charWidget = document.querySelector('[data-widget="webCharacteristics"]');
+                    if (charWidget) {
+                        const charText = charWidget.innerText;
+                        
+                        // 提取重量："Вес товара, г: 171" 或 "Вес, кг: 0.171"
+                        const weightPatterns = [
+                            /\u0412\u0435\u0441[^:]*,\s*\u0433\s*[:\n]\s*([\d.,]+)/i,
+                            /\u0412\u0435\u0441[^:]*,\s*\u043a\u0433\s*[:\n]\s*([\d.,]+)/i,
+                            /\u0412\u0435\u0441[^:]*\s*[:\n]\s*([\d.,]+)\s*\u0433/i,
+                            /\u0412\u0435\u0441[^:]*\s*[:\n]\s*([\d.,]+)\s*\u043a\u0433/i,
+                            /weight[^:]*:\s*([\d.,]+)/i,
+                        ];
+                        for (const p of weightPatterns) {
+                            const m = charText.match(p);
+                            if (m) {
+                                const val = parseFloat(m[1].replace(',', '.'));
+                                if (charText.match(p)[0].includes('\u043a\u0433') || charText.match(p)[0].includes('kg')) {
+                                    data.weight_g = val * 1000;
+                                } else {
+                                    data.weight_g = val;
+                                }
+                                break;
+                            }
+                        }
+                        
+                        // 提取尺寸："Размеры, мм: 147,6х71,6х7,8" 或分开的长宽高
+                        const dimMatch = charText.match(/\u0420\u0430\u0437\u043c\u0435\u0440\u044b[^:]*,\s*\u043c\u043c\s*[:\n]\s*([\d.,]+)\s*[\u0445xX\u00d7]\s*([\d.,]+)\s*[\u0445xX\u00d7]\s*([\d.,]+)/i);
+                        if (dimMatch) {
+                            data.length_cm = parseFloat(dimMatch[1].replace(',', '.')) / 10;
+                            data.width_cm = parseFloat(dimMatch[2].replace(',', '.')) / 10;
+                            data.height_cm = parseFloat(dimMatch[3].replace(',', '.')) / 10;
+                        } else {
+                            // 分别提取长宽高
+                            const lenMatch = charText.match(/\u0414\u043b\u0438\u043d\u0430[^:]*\s*[:\n]\s*([\d.,]+)/i);
+                            const widMatch = charText.match(/\u0428\u0438\u0440\u0438\u043d\u0430[^:]*\s*[:\n]\s*([\d.,]+)/i);
+                            const heiMatch = charText.match(/\u0412\u044b\u0441\u043e\u0442\u0430[^:]*\s*[:\n]\s*([\d.,]+)/i);
+                            if (lenMatch) data.length_cm = parseFloat(lenMatch[1].replace(',', '.'));
+                            if (widMatch) data.width_cm = parseFloat(widMatch[1].replace(',', '.'));
+                            if (heiMatch) data.height_cm = parseFloat(heiMatch[1].replace(',', '.'));
+                        }
+                    }
+
+                    // === 增强：提取跟卖数量（webBestSeller widget） ===
+                    const bestSellerWidget = document.querySelector('[data-widget="webBestSeller"]');
+                    if (bestSellerWidget) {
+                        const bsText = bestSellerWidget.innerText;
+                        // "Есть дешевле или быстрее\nот 46 378 ₽\n50"
+                        const countMatch = bsText.match(/(\d+)\s*$/);
+                        if (countMatch) {
+                            data.followers_count = parseInt(countMatch[1]);
+                        }
+                        const priceMatch = bsText.match(/\u043e\u0442\s+([\d\s]+)\s*\u20bd/i);
+                        if (priceMatch) {
+                            data.follower_min_price = parseFloat(priceMatch[1].replace(/\s/g, ''));
                         }
                     }
 
